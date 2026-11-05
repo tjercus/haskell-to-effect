@@ -14,3 +14,9 @@ export class ParseError extends Data.TaggedError("ParseError")<{
 }> {}
 
 export type SyntaxError = LexError | ParseError;
+
+/** An unbound, duplicated or otherwise ill-scoped name. */
+export class ScopeError extends Data.TaggedError("ScopeError")<{
+  readonly message: string;
+  readonly span: Span;
+}> {}

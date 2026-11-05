@@ -17,3 +17,8 @@ export const span = (start: Pos, end: Pos): Span => ({ start, end });
 export const merge = (a: Span, b: Span): Span => ({ start: a.start, end: b.end });
 
 export const showPos = (p: Pos): string => `${p.line}:${p.col}`;
+
+const origin: Pos = { offset: 0, line: 0, col: 0 };
+
+/** A placeholder span for built-in (Prelude) definitions. */
+export const noSpan: Span = { start: origin, end: origin };

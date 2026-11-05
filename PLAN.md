@@ -119,13 +119,16 @@ src/
     layout.ts      layout rule as a lazy stream → virtual { ; }
     parser.ts      recursive descent + Pratt for operators
     ast.ts         surface AST
-  rename.ts        scoping; unbound / duplicate name errors
-  desugar.ts       surface → Core (equations → case, guards, where → let,
-                   sections → lambdas, list literals → cons, do → binds)
-  core.ts          Core: Var Lit App Lam Let(rec) Case Con — every node carries a type slot
+  prelude.ts       built-in values (with Haskell type signatures) and data types
+  core/
+    core.ts        Core: Var Prim Con Lit App Lam Let If Match Typed
+    lower.ts       scoping + desugaring (equations → Match, guards, where → let,
+                   sections → lambdas, list literals → cons, do → >>= / >>)
+    scc.ts         dependency groups (Tarjan)
+    pretty.ts      Core printer for snapshots
   types/
-    infer.ts       Hindley–Milner (algorithm W), let-polymorphism, dependency
-                   analysis (SCCs) for mutually recursive top-levels, signature checking
+    infer.ts       Hindley–Milner (algorithm W), let-polymorphism per dependency
+                   group, signature checking
     elaborate.ts   apply final substitution; record generalised type params per binding
   match.ts         nested patterns → decision trees
   codegen/
@@ -167,7 +170,9 @@ Each ends with green `vp test` and `vp check`.
    braced versions. ✅
 3. **Declarations + patterns** — module header, multi-equation functions, guards, `where`,
    `data`, `case`, signatures, and `do` syntax (semantics in milestone 7). ✅
-4. **Rename + desugar to Core.** Done: Core snapshots for all syntax forms.
+4. **Rename + desugar to Core** — one pass (`core/lower.ts`); dependency analysis (SCCs)
+   happens here, so Core `Let`s are already in dependency order. Done: Core snapshots for
+   all syntax forms. ✅
 5. **Type inference + elaboration** — HM, SCCs, signature checking, readable type errors
    (expected vs. actual, with span). Done: inferred-type tests and error tests.
 6. **Typed TS codegen for pure code + runtime + `compile`/`run` CLI** — first runnable
