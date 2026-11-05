@@ -45,7 +45,8 @@ export {
   showType,
   zonk,
 } from "./types/types.ts";
-export { type CodegenOptions, generate } from "./codegen/ts.ts";
+export { type CodegenOptions, type Warning, generate } from "./codegen/ts.ts";
+export { type CompiledMatch, type Decision, MatchCompiler } from "./codegen/match.ts";
 export {
   type CompileError,
   type CompileOptions,
@@ -53,6 +54,7 @@ export {
   GenerateError,
   compile,
   entrySource,
+  formatDiagnostic,
   formatError,
   runtimeSource,
 } from "./compile.ts";

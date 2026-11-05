@@ -15,18 +15,10 @@
  * - `show` and `print` are type-directed: a shower is built from the argument's static type,
  *   with the runtime's reflective `showAny` for unknown (polymorphic) parts.
  */
-import type {
-  Bind,
-  BindGroup,
-  CExpr,
-  CPat,
-  DataInfo,
-  GuardedBody,
-  Match,
-  Name,
-} from "../core/core.ts";
+import type { Bind, BindGroup, CExpr, DataInfo, GuardedBody, Match, Name } from "../core/core.ts";
 import { bindsOf } from "../core/core.ts";
 import { tupleArity } from "../prelude.ts";
+import { type Binding, type CompiledMatch, type Decision, MatchCompiler } from "./match.ts";
 import type { Span } from "../syntax/span.ts";
 import type { TypedProgram } from "../types/infer.ts";
 import { type Scheme, type TVar, type Type, isFun, prune, zonk } from "../types/types.ts";
@@ -93,6 +85,12 @@ const isOrdPrim = (t: Type): boolean => {
   return p._tag === "TCon" && (p.name === "Int" || p.name === "Char");
 };
 
+/** A compile-time warning, such as a non-exhaustive pattern match. */
+export interface Warning {
+  readonly message: string;
+  readonly span: Span;
+}
+
 export class CodegenError extends Error {
   constructor(
     message: string,
@@ -113,12 +111,16 @@ class Gen {
   /** Local name of the `Effect` module (renamed if a user type or constructor is `Effect`). */
   private readonly effect: string;
   private usesEffect = false;
+  private readonly matcher: MatchCompiler;
+  /** Warnings found while compiling pattern matches. */
+  readonly warnings: Array<Warning> = [];
 
   constructor(
     private readonly tp: TypedProgram,
     private readonly options: CodegenOptions,
   ) {
     for (const d of tp.program.data) this.data.set(d.name, d);
+    this.matcher = new MatchCompiler(tp.program.data);
     for (const d of tp.program.data) for (const c of d.constructors) this.usedNames.add(c.name);
     const taken = tp.program.data.some(
       (d) => d.name === "Effect" || d.constructors.some((c) => c.name === "Effect"),
@@ -538,43 +540,172 @@ class Gen {
       : `${this.options.fileName}:(${start.line},${start.col})-(${end.line},${endCol})`;
   }
 
+  /**
+   * A `Match` as a decision tree. A clause reached from more than one leaf becomes a local
+   * function (a join point), called with its pattern variables and, if its guards can all
+   * fail, a continuation for the rest of the match. Inside `Effect.gen` bodies contain
+   * `yield*`, which cannot move into a nested function, so there clauses are duplicated.
+   */
   private match(m: Match, indent: string, inGen: boolean): Array<string> {
-    const out: Array<string> = [];
     const scrutinees = m.scrutinees.map((s) => this.name(s));
-    let exhaustive = false;
-    for (const clause of m.clauses) {
-      const tests: Array<string> = [];
-      const binds: Array<string> = [];
-      clause.pats.forEach((p, i) => this.pattern(p, scrutinees[i] ?? "undefined", tests, binds));
-      const inner = `${indent}  `;
-      const body = [
-        ...binds.map((b) => `${inner}${b}`),
-        ...this.guarded(clause.body, inner, inGen),
-      ];
-      if (tests.length === 0) {
-        out.push(`${indent}{`, ...body, `${indent}}`);
-        if (this.alwaysReturns(clause.body)) {
-          exhaustive = true;
-          break;
-        }
-      } else {
-        out.push(`${indent}if (${tests.join(" && ")}) {`, ...body, `${indent}}`);
+    const canFail = m.clauses.map((c) => !this.alwaysReturns(c.body));
+    const compiled = this.matcher.compile(
+      scrutinees,
+      m.clauses.map((c) => c.pats),
+      canFail,
+    );
+    this.checkMatch(m, compiled);
+
+    const leaves = new Map<number, { count: number; bindings: ReadonlyArray<Binding> }>();
+    const visit = (d: Decision): void => {
+      if (d._tag === "Leaf") {
+        const known = leaves.get(d.clause);
+        leaves.set(d.clause, {
+          count: (known?.count ?? 0) + 1,
+          bindings: known?.bindings ?? d.bindings,
+        });
+        if (d.fallback) visit(d.fallback);
+      } else if (d._tag === "Switch") {
+        for (const c of d.cases) visit(c.body);
+        if (d.default) visit(d.default);
+      }
+    };
+    visit(compiled.tree);
+
+    const out: Array<string> = [];
+    const joins = new Map<number, { fn: string; params: ReadonlyArray<Binding> }>();
+    if (!inGen) {
+      const result = this.ts(this.typeOf(m));
+      for (const [clause, { count, bindings }] of leaves) {
+        const c = m.clauses[clause];
+        if (count < 2 || c === undefined) continue;
+        const fn = this.fresh(`clause${clause + 1}`);
+        const params = bindings.map((b) => {
+          const t = this.tp.varTypes.get(b.name.id);
+          return `${this.name(b.name)}: ${t === undefined ? "unknown" : this.ts(t)}`;
+        });
+        const fail = this.fresh("fail");
+        if (canFail[clause] === true) params.push(`${fail}: () => ${result}`);
+        const inner = `${indent}  `;
+        out.push(
+          `${indent}const ${fn} = (${params.join(", ")}): ${result} => {`,
+          ...this.guarded(c.body, inner, false),
+          ...(canFail[clause] === true ? [`${inner}return ${fail}();`] : []),
+          `${indent}};`,
+        );
+        joins.set(clause, { fn, params: bindings });
       }
     }
-    if (!exhaustive) {
-      let message: string;
-      if (m.context === "do-block pattern") {
-        // In IO, a failed pattern in a bind calls `fail`.
-        const pat = m.clauses[0]?.pats[0];
-        message = `user error (Pattern match failure in do expression at ${this.location(pat?.span ?? m.span)})`;
-      } else {
-        // GHC's wording: "function f", "case", "lambda".
-        const context = m.context.replace(/'/g, "").replace("case expression", "case");
-        message = `${this.location(m.span)}: Non-exhaustive patterns in ${context}`;
-      }
-      out.push(`${indent}return rt.patternFail(${JSON.stringify(message)});`);
-    }
+    out.push(...this.decision(compiled.tree, m, indent, inGen, joins));
     return out;
+  }
+
+  private failure(m: Match): string {
+    if (m.context === "do-block pattern") {
+      // In IO, a failed pattern in a bind calls `fail`.
+      const pat = m.clauses[0]?.pats[0];
+      return `user error (Pattern match failure in do expression at ${this.location(pat?.span ?? m.span)})`;
+    }
+    // GHC's wording: "function f", "case", "lambda".
+    const context = m.context.replace(/'/g, "").replace("case expression", "case");
+    return `${this.location(m.span)}: Non-exhaustive patterns in ${context}`;
+  }
+
+  private decision(
+    d: Decision,
+    m: Match,
+    indent: string,
+    inGen: boolean,
+    joins: ReadonlyMap<number, { fn: string; params: ReadonlyArray<Binding> }>,
+  ): Array<string> {
+    const inner = `${indent}  `;
+    switch (d._tag) {
+      case "Fail":
+        return [`${indent}return rt.patternFail(${JSON.stringify(this.failure(m))});`];
+      case "Leaf": {
+        const join = joins.get(d.clause);
+        if (join !== undefined) {
+          const args = join.params.map(
+            (p) => d.bindings.find((b) => b.name.id === p.name.id)?.occ ?? "undefined",
+          );
+          if (d.fallback !== undefined) {
+            args.push(
+              `() => {\n${this.decision(d.fallback, m, inner, inGen, joins).join("\n")}\n${indent}}`,
+            );
+          }
+          return [`${indent}return ${join.fn}(${args.join(", ")});`];
+        }
+        const clause = m.clauses[d.clause];
+        if (clause === undefined) return [];
+        return [
+          ...d.bindings.map((b) => `${indent}const ${this.name(b.name)} = ${b.occ};`),
+          ...this.guarded(clause.body, indent, inGen),
+          ...(d.fallback === undefined ? [] : this.decision(d.fallback, m, indent, inGen, joins)),
+        ];
+      }
+      case "Switch": {
+        const [only] = d.cases;
+        if (d.cases.length === 1 && only !== undefined && d.default === undefined) {
+          // The type has a single constructor: nothing to test.
+          return this.decision(only.body, m, indent, inGen, joins);
+        }
+        if (d.kind === "tag") {
+          const out = [`${indent}switch (${d.occ}._tag) {`];
+          d.cases.forEach((c, i) => {
+            // The last case of an exhaustive switch is `default`, so every path returns.
+            const last = i === d.cases.length - 1 && d.default === undefined;
+            out.push(
+              `${inner}${last ? "default" : `case "${c.test}"`}: {`,
+              ...this.decision(c.body, m, `${inner}  `, inGen, joins),
+              `${inner}}`,
+            );
+          });
+          if (d.default !== undefined) {
+            out.push(
+              `${inner}default: {`,
+              ...this.decision(d.default, m, `${inner}  `, inGen, joins),
+              `${inner}}`,
+            );
+          }
+          out.push(`${indent}}`);
+          return out;
+        }
+        // Booleans and literals: an `if` chain; the last alternative needs no test.
+        const out: Array<string> = [];
+        const alternatives = d.cases.map((c) => ({ test: `${d.occ} === ${c.test}`, body: c.body }));
+        const rest = d.default ?? alternatives.pop()?.body;
+        for (const a of alternatives) {
+          out.push(
+            `${indent}if (${a.test}) {`,
+            ...this.decision(a.body, m, inner, inGen, joins),
+            `${indent}}`,
+          );
+        }
+        if (rest !== undefined) out.push(...this.decision(rest, m, indent, inGen, joins));
+        return out;
+      }
+    }
+  }
+
+  /** Warns about non-exhaustive matches and redundant clauses, as GHC does. */
+  private checkMatch(m: Match, compiled: CompiledMatch): void {
+    if (m.context === "do-block pattern" || m.context === "pattern binding") return;
+    if (compiled.missing.length > 0) {
+      const shown = [...new Set(compiled.missing.map((w) => (w.length === 0 ? "_" : w.join(" "))))];
+      const list = shown.slice(0, 3).join(", ") + (shown.length > 3 ? ", …" : "");
+      this.warnings.push({
+        message: `pattern match is non-exhaustive in ${m.context}; patterns not matched: ${list}`,
+        span: m.span,
+      });
+    }
+    m.clauses.forEach((c, i) => {
+      if (!compiled.reachable.has(i)) {
+        this.warnings.push({
+          message: `pattern match is redundant in ${m.context}: this clause can never match`,
+          span: c.span,
+        });
+      }
+    });
   }
 
   private alwaysReturns(b: GuardedBody): boolean {
@@ -608,55 +739,6 @@ class Gen {
           );
         }
         return out;
-      }
-    }
-  }
-
-  /** Adds the tests and bindings that match `p` against the value at `path`. */
-  private pattern(p: CPat, path: string, tests: Array<string>, binds: Array<string>): void {
-    switch (p._tag) {
-      case "PVar":
-        binds.push(`const ${this.name(p.name)} = ${path};`);
-        return;
-      case "PWildcard":
-        return;
-      case "PAs":
-        binds.push(`const ${this.name(p.name)} = ${path};`);
-        this.pattern(p.pat, path, tests, binds);
-        return;
-      case "PLit":
-        if (p.lit._tag === "String")
-          tests.push(`rt.equals(${path}, rt.str(${JSON.stringify(p.lit.value)}))`);
-        else
-          tests.push(
-            `${path} === ${p.lit._tag === "Int" ? String(p.lit.value) : JSON.stringify(p.lit.value)}`,
-          );
-        return;
-      case "PCon": {
-        switch (p.name) {
-          case "True":
-          case "False":
-            tests.push(`${path} === ${p.name === "True"}`);
-            return;
-          case "()":
-            return;
-          case "[]":
-            tests.push(`${path}._tag === "Nil"`);
-            return;
-          case ":": {
-            tests.push(`${path}._tag === "Cons"`);
-            const [h, t] = p.args;
-            if (h) this.pattern(h, `${path}.head`, tests, binds);
-            if (t) this.pattern(t, `${path}.tail`, tests, binds);
-            return;
-          }
-        }
-        if (tupleArity(p.name) !== undefined) {
-          p.args.forEach((a, i) => this.pattern(a, `${path}[${i}]`, tests, binds));
-          return;
-        }
-        tests.push(`${path}._tag === "${p.name}"`);
-        p.args.forEach((a, i) => this.pattern(a, `${path}.a${i}`, tests, binds));
       }
     }
   }
@@ -892,5 +974,11 @@ class Gen {
 }
 
 /** Generates a TypeScript module for a typed program. Throws `CodegenError`. */
-export const generate = (tp: TypedProgram, options: CodegenOptions): string =>
-  new Gen(tp, options).program();
+export const generate = (
+  tp: TypedProgram,
+  options: CodegenOptions,
+): { readonly code: string; readonly warnings: ReadonlyArray<Warning> } => {
+  const gen = new Gen(tp, options);
+  const code = gen.program();
+  return { code, warnings: gen.warnings };
+};

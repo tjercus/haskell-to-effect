@@ -3,7 +3,7 @@
  */
 import { Result } from "effect";
 import { readFileSync } from "node:fs";
-import { CodegenError, generate } from "./codegen/ts.ts";
+import { CodegenError, type Warning, generate } from "./codegen/ts.ts";
 import { lowerModule } from "./core/lower.ts";
 import { LexError, ParseError, ScopeError, TypeCheckError } from "./errors.ts";
 import { parseModule } from "./syntax/parser.ts";
@@ -31,7 +31,11 @@ export interface CompileOptions {
 export interface Compiled {
   /** The generated TypeScript module. */
   readonly code: string;
+  /** Compile-time warnings, such as non-exhaustive pattern matches. */
+  readonly warnings: ReadonlyArray<Warning>;
 }
+
+export type { Warning };
 
 /** Parses, checks and compiles a Haskell module. */
 export const compile = (
@@ -45,11 +49,11 @@ export const compile = (
   const typed = inferProgram(lowered.success);
   if (Result.isFailure(typed)) return Result.fail(typed.failure);
   try {
-    const code = generate(typed.success, {
+    const { code, warnings } = generate(typed.success, {
       fileName: options.fileName,
       runtimeImport: options.runtimeImport ?? "./hs-runtime.ts",
     });
-    return Result.succeed({ code });
+    return Result.succeed({ code, warnings });
   } catch (e) {
     if (e instanceof CodegenError) return Result.fail(new GenerateError(e.message, e.span));
     throw e;
@@ -70,9 +74,18 @@ export const entrySource = (moduleFile: string, prog: string): string =>
   ].join("\n");
 
 /** Formats a compile error as `file:line:col: error: message` with the offending source line. */
-export const formatError = (e: CompileError, source: string, fileName: string): string => {
+export const formatError = (e: CompileError, source: string, fileName: string): string =>
+  formatDiagnostic("error", e, source, fileName);
+
+/** Formats a diagnostic as `file:line:col: <severity>: message` with the offending source line. */
+export const formatDiagnostic = (
+  severity: "error" | "warning",
+  e: { readonly message: string; readonly span: Span },
+  source: string,
+  fileName: string,
+): string => {
   const { start, end } = e.span;
-  if (start.line === 0) return `${fileName}: error: ${e.message}`;
+  if (start.line === 0) return `${fileName}: ${severity}: ${e.message}`;
   const line = source.split(/\r\n|\r|\n/)[start.line - 1] ?? "";
   const width =
     end.line === start.line
@@ -80,7 +93,7 @@ export const formatError = (e: CompileError, source: string, fileName: string): 
       : Math.max(1, line.length - start.col + 1);
   const gutter = String(start.line).length;
   return [
-    `${fileName}:${start.line}:${start.col}: error: ${e.message}`,
+    `${fileName}:${start.line}:${start.col}: ${severity}: ${e.message}`,
     `${" ".repeat(gutter)} |`,
     `${start.line} | ${line}`,
     `${" ".repeat(gutter)} | ${" ".repeat(start.col - 1)}${"^".repeat(width)}`,

@@ -1,0 +1,6 @@
+["both","not both","not both"]
+("zero, empty","head equals n","two elements","other 5","other 0")
+["bye","usage","comment: note","unknown hello","unknown "]
+[Green,Blue,Red]
+[(1,'a'),(2,'b')]
+(Just ('x','y'),Nothing)

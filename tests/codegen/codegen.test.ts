@@ -27,10 +27,13 @@ describe("code generation", () => {
     );
   });
 
-  test("pattern matching compiles to tag tests", () => {
+  test("pattern matching compiles to a switch on the tag", () => {
     const c = code("f (Just x) = x", "f Nothing = 0", "main = print (f (Just 1))");
-    expect(c).toContain('if (arg._tag === "Just") {');
-    expect(c).toContain('if (arg._tag === "Nothing") {');
+    expect(c).toContain("switch (arg._tag) {");
+    expect(c).toContain('case "Nothing": {');
+    // The last case of an exhaustive switch is `default`, so every path returns.
+    expect(c).toContain("default: {\n      const x = arg.a0;");
+    expect(c).not.toContain("patternFail");
   });
 
   test("an irrefutable last clause needs no pattern-match failure", () => {

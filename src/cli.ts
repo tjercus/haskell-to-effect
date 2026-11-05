@@ -11,7 +11,14 @@ import { Console, Effect, FileSystem, Option, Path, Result } from "effect";
 import { Argument, Command, Flag } from "effect/cli";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { type Compiled, compile, entrySource, formatError, runtimeSource } from "./compile.ts";
+import {
+  type Compiled,
+  compile,
+  entrySource,
+  formatDiagnostic,
+  formatError,
+  runtimeSource,
+} from "./compile.ts";
 
 const sourceFile = Argument.File("file", { mustExist: true }).pipe(
   Argument.withDescription("The Haskell source file (.hs)"),
@@ -29,6 +36,9 @@ const compileFile = (file: string) =>
       yield* Console.error(formatError(result.failure, source, file));
       process.exitCode = 1;
       return Option.none<{ compiled: Compiled; moduleName: string }>();
+    }
+    for (const w of result.success.warnings) {
+      yield* Console.error(formatDiagnostic("warning", w, source, file));
     }
     const moduleName = fileName.replace(/\.l?hs$/, "");
     return Option.some({ compiled: result.success, moduleName });

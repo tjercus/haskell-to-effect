@@ -130,10 +130,9 @@ src/
     types.ts       type representation, zonking, printing
     infer.ts       Hindley–Milner, let-polymorphism per dependency group, signature
                    checking; records types for codegen (no separate elaboration pass)
-  match.ts         nested patterns → decision trees
   codegen/
-    types.ts       Haskell types → TS type syntax
-    ts.ts          typed Core → TS source
+    match.ts       Match → decision trees; exhaustiveness and redundancy
+    ts.ts          typed Core → TS source (types, showers, decision trees, Effect.gen)
   runtime/
     hs-runtime.ts  List, Char, IO, show/eq, Prelude, getLine/putStrLn on Terminal
   errors.ts        tagged errors + code-frame formatting
@@ -189,7 +188,12 @@ Each ends with green `vp test` and `vp check`.
    `do` blocks compile to `Effect.gen` (one `yield*` per statement, nested `if`/`do`
    flattened). The runtime implements `Terminal` on one `readline` interface, so compiled
    programs depend only on `effect`; `testTerminal` feeds input and records output.
-8. **Pattern-match compilation** — decision trees, nested patterns, located failures.
+8. **Pattern-match compilation** — decision trees, nested patterns, located failures. ✅
+   Maranget's matrix algorithm (first-row heuristic): every value tested at most once;
+   exhaustive switches end in `default` so TypeScript proves every path returns; clauses
+   reached from several leaves become join points (with a failure continuation if guarded;
+   duplicated inside `Effect.gen`); string literals match character by character.
+   GHC-style warnings for non-exhaustive matches (with a witness) and redundant clauses.
 9. **Polish** — code frames, larger golden suite, README listing all deviations from Haskell.
 
 Stretch: records, `type` synonyms, opt-in laziness.
