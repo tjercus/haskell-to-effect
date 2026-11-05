@@ -76,7 +76,7 @@ const primJs: Record<string, string> = {
   null: "null_",
 };
 
-const unsupportedPrims = new Map([["getLine", "'getLine' is not supported yet"]]);
+const unsupportedPrims = new Map<string, string>();
 
 type Code = { readonly code: string; readonly atomic: boolean };
 const atom = (code: string): Code => ({ code, atomic: true });
@@ -110,6 +110,9 @@ class Gen {
   /** Binders emitted as generic functions: they take explicit type arguments when called. */
   private readonly genericBinders = new Set<number>();
   private readonly data = new Map<string, DataInfo>();
+  /** Local name of the `Effect` module (renamed if a user type or constructor is `Effect`). */
+  private readonly effect: string;
+  private usesEffect = false;
 
   constructor(
     private readonly tp: TypedProgram,
@@ -117,6 +120,11 @@ class Gen {
   ) {
     for (const d of tp.program.data) this.data.set(d.name, d);
     for (const d of tp.program.data) for (const c of d.constructors) this.usedNames.add(c.name);
+    const taken = tp.program.data.some(
+      (d) => d.name === "Effect" || d.constructors.some((c) => c.name === "Effect"),
+    );
+    this.effect = taken ? "Effect$" : "Effect";
+    this.usedNames.add(this.effect);
   }
 
   // ---- names --------------------------------------------------------------------------
@@ -401,7 +409,7 @@ class Gen {
       }
       const t = this.ts(type);
       // Top-level IO actions are built when they run, so that errors happen in order.
-      if (type._tag === "TCon" && type.name === "IO" && exported) {
+      if (type._tag === "TCon" && type.name === "IO" && exported && !this.isIOChain(b.expr)) {
         return [`${prefix}: ${t} = rt.suspend(() => ${this.expr(b.expr, indent).code});`];
       }
       return [`${prefix}: ${t} = ${this.expr(b.expr, indent).code};`];
@@ -432,25 +440,93 @@ class Gen {
 
   /** Statements that evaluate `e` and return it. */
   private returns(e: CExpr, indent: string): Array<string> {
+    return this.statements(e, indent, false);
+  }
+
+  /**
+   * Statements that evaluate `e` and return it. With `inGen`, they are the body of an
+   * `Effect.gen` generator and `e` is an IO action: `>>=` and `>>` become `yield*`
+   * statements, and the final action is returned with `return yield*`.
+   */
+  private statements(e: CExpr, indent: string, inGen: boolean): Array<string> {
+    if (inGen) {
+      const step = this.ioStep(e);
+      if (step?.kind === "bind") {
+        const t = this.tp.varTypes.get(step.param.id);
+        const annotation = t === undefined ? "" : `: ${this.ts(t)}`;
+        return [
+          `${indent}const ${this.name(step.param)}${annotation} = yield* ${this.expr(step.action, indent).code};`,
+          ...this.statements(step.rest, indent, true),
+        ];
+      }
+      if (step?.kind === "then") {
+        return [
+          `${indent}yield* ${this.expr(step.action, indent).code};`,
+          ...this.statements(step.rest, indent, true),
+        ];
+      }
+    }
     switch (e._tag) {
       case "Let":
-        return [...this.group(e.group, indent, false), ...this.returns(e.body, indent)];
+        return [...this.group(e.group, indent, false), ...this.statements(e.body, indent, inGen)];
       case "Match":
-        return this.match(e, indent);
-      case "If":
-        if (this.needsStatements(e.thenBranch) || this.needsStatements(e.elseBranch)) {
+        return this.match(e, indent, inGen);
+      case "If": {
+        const branchy = (x: CExpr): boolean =>
+          this.needsStatements(x) || (inGen && this.isIOChain(x));
+        if (branchy(e.thenBranch) || branchy(e.elseBranch)) {
           return [
             `${indent}if (${this.expr(e.cond, indent).code}) {`,
-            ...this.returns(e.thenBranch, `${indent}  `),
+            ...this.statements(e.thenBranch, `${indent}  `, inGen),
             `${indent}}`,
-            ...this.returns(e.elseBranch, indent),
+            ...this.statements(e.elseBranch, indent, inGen),
           ];
         }
         break;
+      }
       default:
         break;
     }
+    if (inGen) {
+      // `return x` at the end of a do block is just the value.
+      if (
+        e._tag === "App" &&
+        e.fn._tag === "Prim" &&
+        (e.fn.name === "return" || e.fn.name === "pure")
+      ) {
+        return [`${indent}return ${this.expr(e.arg, indent).code};`];
+      }
+      return [`${indent}return yield* ${this.expr(e, indent).code};`];
+    }
     return [`${indent}return ${this.expr(e, indent).code};`];
+  }
+
+  /** `m >>= \x -> rest` or `m >> rest`, the steps of a desugared do block. */
+  private ioStep(
+    e: CExpr,
+  ):
+    | { readonly kind: "bind"; readonly action: CExpr; readonly param: Name; readonly rest: CExpr }
+    | { readonly kind: "then"; readonly action: CExpr; readonly rest: CExpr }
+    | undefined {
+    if (e._tag !== "App" || e.fn._tag !== "App" || e.fn.fn._tag !== "Prim") return undefined;
+    const action = e.fn.arg;
+    if (e.fn.fn.name === ">>") return { kind: "then", action, rest: e.arg };
+    if (e.fn.fn.name === ">>=" && e.arg._tag === "Lam") {
+      return { kind: "bind", action, param: e.arg.param, rest: e.arg.body };
+    }
+    return undefined;
+  }
+
+  /** Whether `e` is (a `let` around) a sequence of IO actions, emitted as `Effect.gen`. */
+  private isIOChain(e: CExpr): boolean {
+    if (e._tag === "Let") return this.isIOChain(e.body);
+    return this.ioStep(e) !== undefined;
+  }
+
+  private gen(e: CExpr, indent: string): Code {
+    this.usesEffect = true;
+    const body = this.statements(e, `${indent}  `, true).join("\n");
+    return atom(`${this.effect}.gen(function* () {\n${body}\n${indent}})`);
   }
 
   /** A source range as GHC prints it: `f.hs:3:5-9` or `f.hs:(3,1)-(4,20)`. */
@@ -462,7 +538,7 @@ class Gen {
       : `${this.options.fileName}:(${start.line},${start.col})-(${end.line},${endCol})`;
   }
 
-  private match(m: Match, indent: string): Array<string> {
+  private match(m: Match, indent: string, inGen: boolean): Array<string> {
     const out: Array<string> = [];
     const scrutinees = m.scrutinees.map((s) => this.name(s));
     let exhaustive = false;
@@ -471,7 +547,10 @@ class Gen {
       const binds: Array<string> = [];
       clause.pats.forEach((p, i) => this.pattern(p, scrutinees[i] ?? "undefined", tests, binds));
       const inner = `${indent}  `;
-      const body = [...binds.map((b) => `${inner}${b}`), ...this.guarded(clause.body, inner)];
+      const body = [
+        ...binds.map((b) => `${inner}${b}`),
+        ...this.guarded(clause.body, inner, inGen),
+      ];
       if (tests.length === 0) {
         out.push(`${indent}{`, ...body, `${indent}}`);
         if (this.alwaysReturns(clause.body)) {
@@ -483,9 +562,16 @@ class Gen {
       }
     }
     if (!exhaustive) {
-      // GHC's wording: "function f", "case", "lambda".
-      const context = m.context.replace(/'/g, "").replace("case expression", "case");
-      const message = `${this.location(m.span)}: Non-exhaustive patterns in ${context}`;
+      let message: string;
+      if (m.context === "do-block pattern") {
+        // In IO, a failed pattern in a bind calls `fail`.
+        const pat = m.clauses[0]?.pats[0];
+        message = `user error (Pattern match failure in do expression at ${this.location(pat?.span ?? m.span)})`;
+      } else {
+        // GHC's wording: "function f", "case", "lambda".
+        const context = m.context.replace(/'/g, "").replace("case expression", "case");
+        message = `${this.location(m.span)}: Non-exhaustive patterns in ${context}`;
+      }
       out.push(`${indent}return rt.patternFail(${JSON.stringify(message)});`);
     }
     return out;
@@ -502,22 +588,22 @@ class Gen {
     }
   }
 
-  private guarded(b: GuardedBody, indent: string): Array<string> {
+  private guarded(b: GuardedBody, indent: string, inGen: boolean): Array<string> {
     switch (b._tag) {
       case "Body":
-        return this.returns(b.expr, indent);
+        return this.statements(b.expr, indent, inGen);
       case "LetBody":
-        return [...this.group(b.group, indent, false), ...this.guarded(b.body, indent)];
+        return [...this.group(b.group, indent, false), ...this.guarded(b.body, indent, inGen)];
       case "Guards": {
         const out: Array<string> = [];
         for (const g of b.guards) {
           if (g.cond._tag === "Con" && g.cond.name === "True") {
-            out.push(...this.returns(g.expr, indent));
+            out.push(...this.statements(g.expr, indent, inGen));
             break;
           }
           out.push(
             `${indent}if (${this.expr(g.cond, indent).code}) {`,
-            ...this.returns(g.expr, `${indent}  `),
+            ...this.statements(g.expr, `${indent}  `, inGen),
             `${indent}}`,
           );
         }
@@ -582,6 +668,7 @@ class Gen {
   }
 
   private expr(e: CExpr, indent: string): Code {
+    if (this.isIOChain(e)) return this.gen(e, indent);
     switch (e._tag) {
       case "Var":
         return atom(this.name(e.name));
@@ -787,17 +874,20 @@ class Gen {
   // ---- program ------------------------------------------------------------------------------
 
   program(): string {
-    const out: Array<string> = [
-      `// Generated by haskell-to-effect from ${this.options.fileName}. Do not edit.`,
-      `import * as rt from ${JSON.stringify(this.options.runtimeImport)};`,
-      "",
-    ];
+    const body: Array<string> = [];
     for (const d of this.tp.program.data) {
       if (d.builtin) continue;
-      out.push(...this.dataDecl(d), "");
+      body.push(...this.dataDecl(d), "");
     }
-    for (const g of this.tp.program.groups) out.push(...this.group(g, "", true), "");
-    return out.join("\n");
+    for (const g of this.tp.program.groups) body.push(...this.group(g, "", true), "");
+    const effectImport = this.effect === "Effect" ? "Effect" : `Effect as ${this.effect}`;
+    return [
+      `// Generated by haskell-to-effect from ${this.options.fileName}. Do not edit.`,
+      ...(this.usesEffect ? [`import { ${effectImport} } from "effect";`] : []),
+      `import * as rt from ${JSON.stringify(this.options.runtimeImport)};`,
+      "",
+      ...body,
+    ].join("\n");
   }
 }
 

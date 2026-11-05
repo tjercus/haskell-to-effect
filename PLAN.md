@@ -185,7 +185,10 @@ Each ends with green `vp test` and `vp check`.
    output; `>>` defers its second action and top-level IO is suspended, so errors happen
    in program order despite strict evaluation.
 7. **IO on Effect** — `do`, `getLine`, `putStrLn`, `print`, `>>=`, `return`; tests provide
-   a mock `Terminal` layer for stdin/stdout. Done: the example above runs. **← end-to-end**
+   a mock `Terminal` layer for stdin/stdout. Done: the example above runs. **← end-to-end** ✅
+   `do` blocks compile to `Effect.gen` (one `yield*` per statement, nested `if`/`do`
+   flattened). The runtime implements `Terminal` on one `readline` interface, so compiled
+   programs depend only on `effect`; `testTerminal` feeds input and records output.
 8. **Pattern-match compilation** — decision trees, nested patterns, located failures.
 9. **Polish** — code frames, larger golden suite, README listing all deviations from Haskell.
 

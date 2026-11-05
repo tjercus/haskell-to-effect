@@ -13,7 +13,8 @@
  * This file is copied next to every compiled module, so it only uses erasable TypeScript
  * syntax and depends on nothing but `effect`.
  */
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Effect, Exit, Layer, Terminal } from "effect";
+import { createInterface } from "node:readline";
 
 // ---- representation -----------------------------------------------------------------
 
@@ -21,7 +22,8 @@ export type Char = string;
 export type List<A> =
   | { readonly _tag: "Nil" }
   | { readonly _tag: "Cons"; readonly head: A; readonly tail: List<A> };
-export type IO<A> = Effect.Effect<A>;
+/** An IO action: an Effect that performs console I/O through the `Terminal` service. */
+export type IO<A> = Effect.Effect<A, never, Terminal.Terminal>;
 export type Maybe<A> = { readonly _tag: "Nothing" } | { readonly _tag: "Just"; readonly a0: A };
 export type Either<A, B> =
   | { readonly _tag: "Left"; readonly a0: A }
@@ -524,20 +526,30 @@ export const showWith =
 
 // ---- IO ---------------------------------------------------------------------------------
 
-const write = (s: string): IO<undefined> =>
-  Effect.sync(() => {
-    process.stdout.write(s);
+const display = (text: string): IO<undefined> =>
+  Effect.gen(function* () {
+    const terminal = yield* Terminal.Terminal;
+    yield* Effect.orDie(terminal.display(text));
     return undefined;
   });
 
-export const putStr = (s: List<Char>): IO<undefined> => Effect.suspend(() => write(toJs(s)));
+export const putStr = (s: List<Char>): IO<undefined> => Effect.suspend(() => display(toJs(s)));
 export const putStrLn = (s: List<Char>): IO<undefined> =>
-  Effect.suspend(() => write(`${toJs(s)}\n`));
+  Effect.suspend(() => display(`${toJs(s)}\n`));
 export const printWith =
   <A>(s: Shower<A>) =>
   (x: A): IO<undefined> =>
-    Effect.suspend(() => write(`${s(0, x)}\n`));
+    Effect.suspend(() => display(`${s(0, x)}\n`));
 export const print = <A>(x: A): IO<undefined> => printWith<A>(showAny)(x);
+
+/** Reads a line from the terminal; at end of input this is an error, as in GHC. */
+export const getLine: IO<List<Char>> = Effect.gen(function* () {
+  const terminal = yield* Terminal.Terminal;
+  const line = yield* Effect.orDie(
+    Effect.mapError(terminal.readLine, () => new HaskellError("<stdin>: hGetLine: end of file")),
+  );
+  return str(line);
+});
 
 export const return_ = <A>(a: A): IO<A> => Effect.succeed(a);
 export const pure = return_;
@@ -566,9 +578,83 @@ export const mapM_ =
 /** Defers building an IO action until it runs, so errors while building it happen in order. */
 export const suspend = <A>(f: () => IO<A>): IO<A> => Effect.suspend(f);
 
+// ---- terminals -----------------------------------------------------------------------------
+
+const unsupported = Effect.die(new HaskellError("unsupported terminal operation"));
+
+/**
+ * A `Terminal` on the process's stdin and stdout. Lines are read through one `readline`
+ * interface, created on the first read, so piped input is not lost between reads.
+ */
+export const nodeTerminal: Layer.Layer<Terminal.Terminal> = Layer.effect(
+  Terminal.Terminal,
+  Effect.map(
+    Effect.acquireRelease(
+      Effect.sync(() => {
+        let rl: ReturnType<typeof createInterface> | undefined;
+        let lines: AsyncIterator<string> | undefined;
+        const next = (): Promise<IteratorResult<string>> => {
+          if (lines === undefined) {
+            rl = createInterface({ input: process.stdin, terminal: false });
+            lines = rl[Symbol.asyncIterator]();
+          }
+          return lines.next();
+        };
+        const terminal = Terminal.make({
+          columns: Effect.sync(() => process.stdout.columns ?? 80),
+          rows: Effect.sync(() => process.stdout.rows ?? 24),
+          size: unsupported,
+          readInput: unsupported,
+          readLine: Effect.flatMap(
+            Effect.promise(() => next()),
+            (r) =>
+              r.done === true ? Effect.fail(new Terminal.QuitError()) : Effect.succeed(r.value),
+          ),
+          display: (text) =>
+            Effect.sync(() => {
+              process.stdout.write(text);
+            }),
+        });
+        return { terminal, close: () => rl?.close() };
+      }),
+      ({ close }) => Effect.sync(close),
+    ),
+    ({ terminal }) => terminal,
+  ),
+);
+
+/** A `Terminal` for tests: reads lines from `input` and appends displayed text to `output`. */
+export const testTerminal = (
+  input: ReadonlyArray<string>,
+  output: Array<string>,
+): Layer.Layer<Terminal.Terminal> => {
+  const pending = [...input];
+  return Layer.succeed(
+    Terminal.Terminal,
+    Terminal.make({
+      columns: Effect.succeed(80),
+      rows: Effect.succeed(24),
+      size: unsupported,
+      readInput: unsupported,
+      readLine: Effect.suspend(() => {
+        const line = pending.shift();
+        return line === undefined ? Effect.fail(new Terminal.QuitError()) : Effect.succeed(line);
+      }),
+      display: (text) =>
+        Effect.sync(() => {
+          output.push(text);
+        }),
+    }),
+  );
+};
+
 /** Runs `main`; a Haskell error is reported as `<prog>: <message>` with exit code 1. */
-export const runMain = async (main: IO<unknown>, prog: string): Promise<void> => {
-  const exit = await Effect.runPromiseExit(main);
+export const runMain = async (
+  main: IO<unknown>,
+  prog: string,
+  terminal: Layer.Layer<Terminal.Terminal> = nodeTerminal,
+): Promise<void> => {
+  const exit = await Effect.runPromiseExit(Effect.provide(main, terminal));
   if (Exit.isSuccess(exit)) return;
   const err = Cause.squash(exit.cause);
   process.stderr.write(

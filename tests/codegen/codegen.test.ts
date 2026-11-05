@@ -49,8 +49,22 @@ describe("code generation", () => {
     expect(c).toContain("export const delete_ =");
   });
 
-  test("unsupported primitives are reported", () => {
-    const r = compile("main = getLine >>= putStrLn", { fileName: "Main.hs" });
-    expect(Result.isFailure(r) && r.failure.message).toMatch(/'getLine' is not supported yet/);
+  test("do blocks become Effect.gen with one statement per line", () => {
+    const c = code("main = do", "  name <- getLine", '  putStrLn ("Hi " ++ name)', "  return ()");
+    expect(c).toContain('import { Effect } from "effect";');
+    expect(c).toContain("export const main: rt.IO<undefined> = Effect.gen(function* () {");
+    expect(c).toContain("  const name: rt.List<rt.Char> = yield* rt.getLine;");
+    expect(c).toContain('  yield* rt.putStrLn(rt.appendList(rt.str("Hi "), name));');
+    expect(c).toContain("  return undefined;");
+  });
+
+  test("modules without do blocks do not import Effect", () => {
+    expect(code('main = putStrLn "hi"')).not.toContain('from "effect"');
+  });
+
+  test("a user constructor named Effect does not clash with the import", () => {
+    const c = code("data Effect = Effect", "main = do { print 1; print 2 }");
+    expect(c).toContain('import { Effect as Effect$ } from "effect";');
+    expect(c).toContain("Effect$.gen(");
   });
 });
