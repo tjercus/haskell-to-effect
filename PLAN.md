@@ -213,8 +213,9 @@ Stretch: records, `type` synonyms, opt-in laziness.
 - **Generic TS for HM types:** curried generics and local polymorphic `let`s must produce
   types TS accepts; unannotatable cases fall back to `unknown` + a cast in generated code.
 - **Deep recursion:** strict recursion over long lists can overflow the JS stack;
-  `foldr`/`map`/`length` in the runtime are written iteratively. User-written recursion is
-  not: one JS frame per call, so depths around 10,000 overflow Node's default stack
-  (tested to 5,000).
+  `foldr`/`map`/`length` in the runtime are written iteratively. Self tail calls in
+  generated code become loops (tested to 1,000,000 iterations). Non-tail and mutual
+  recursion still use one JS frame per call, so depths around 10,000 overflow Node's
+  default stack (tested to 5,000).
 - **Effect 4 API surface** (`Terminal`, `effect/cli`, `NodeRuntime`) — verify exact
   signatures when wiring milestones 6–7.

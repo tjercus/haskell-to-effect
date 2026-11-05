@@ -71,3 +71,45 @@ describe("code generation", () => {
     expect(c).toContain("Effect$.gen(");
   });
 });
+
+describe("tail calls", () => {
+  test("a self tail call becomes a loop iteration", () => {
+    const c = code(
+      "count acc 0 = acc",
+      "count acc n = count (acc + 1) (n - 1)",
+      "main = print (count 0 5)",
+    );
+    expect(c).toContain("for (;;) {");
+    expect(c).toContain("continue;");
+    expect(c).not.toMatch(/return count\(/);
+  });
+
+  test("calls that are not in tail position are left alone", () => {
+    const c = code("len [] = 0", "len (_:xs) = 1 + len xs", "main = print (len [1])");
+    expect(c).not.toContain("for (;;)");
+  });
+
+  test("tail calls through || and if are found", () => {
+    const c = code(
+      "anyOf _ [] = False",
+      "anyOf p (x:xs) = p x || anyOf p xs",
+      "main = print (anyOf not [True])",
+    );
+    expect(c).toContain("for (;;) {");
+  });
+
+  test("polymorphic recursion at another type is not a loop iteration", () => {
+    const c = code(
+      "f :: Int -> a -> Int",
+      "f 0 _ = 0",
+      "f n x = f (n - 1) [x]",
+      "main = print (f 3 'c')",
+    );
+    expect(c).not.toContain("for (;;)");
+  });
+
+  test("recursion inside Effect.gen is left alone (it is already stack-safe)", () => {
+    const c = code("loop 0 = return ()", "loop n = do { print n; loop (n - 1) }", "main = loop 3");
+    expect(c).not.toContain("for (;;)");
+  });
+});

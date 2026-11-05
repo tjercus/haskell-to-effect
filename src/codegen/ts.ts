@@ -71,6 +71,28 @@ const primJs: Record<string, string> = {
 const unsupportedPrims = new Map<string, string>();
 
 type Code = { readonly code: string; readonly atomic: boolean };
+
+/**
+ * A self-recursive function whose tail calls become loop iterations: a saturated call to
+ * `id` with `arity` arguments (at the function's own type) assigns them to `state` and
+ * continues the loop.
+ */
+interface Loop {
+  readonly id: number;
+  readonly arity: number;
+  /** Explicit type arguments the call must have to be a loop iteration. */
+  readonly typeArgs: string;
+  readonly state: ReadonlyArray<string>;
+}
+
+/** How statements are emitted: inside an `Effect.gen` body, and/or inside a tail-call loop. */
+interface Mode {
+  readonly gen: boolean;
+  readonly loop: Loop | undefined;
+}
+
+const PURE: Mode = { gen: false, loop: undefined };
+const GEN: Mode = { gen: true, loop: undefined };
 const atom = (code: string): Code => ({ code, atomic: true });
 const low = (code: string): Code => ({ code, atomic: false });
 const paren = (c: Code): string => (c.atomic ? c.code : `(${c.code})`);
@@ -398,7 +420,10 @@ class Gen {
       if (isFun(type) && (b.expr._tag === "Lam" || generic)) {
         const [paramType, resultType] = type.args;
         let fn: string;
-        if (b.expr._tag === "Lam") {
+        const loop = this.tailLoop(b, tparams, indent);
+        if (loop !== undefined) {
+          fn = loop;
+        } else if (b.expr._tag === "Lam") {
           const param = this.name(b.expr.param);
           const body = this.lamBody(b.expr.body, indent);
           fn = `${tparams}(${param}: ${this.ts(paramType)}): ${this.tsReturn(resultType)} => ${body}`;
@@ -416,6 +441,106 @@ class Gen {
       }
       return [`${prefix}: ${t} = ${this.expr(b.expr, indent).code};`];
     });
+  }
+
+  // ---- tail calls -----------------------------------------------------------------------------
+
+  /**
+   * A function that calls itself in tail position, emitted as a loop: a tail call assigns
+   * the arguments to the loop state and continues. Each iteration binds the parameters as
+   * fresh `const`s, so closures created in one iteration keep that iteration's values; outer
+   * parameters are copied, because a partially applied function shares them between calls.
+   * Returns `undefined` if `b` has no such tail calls.
+   */
+  private tailLoop(b: Bind, typeArgs: string, indent: string): string | undefined {
+    const params: Array<Name> = [];
+    let body = b.expr;
+    while (body._tag === "Lam") {
+      params.push(body.param);
+      body = body.body;
+    }
+    if (params.length === 0) return undefined;
+    const probe: Loop = { id: b.name.id, arity: params.length, typeArgs, state: [] };
+    if (!this.hasTailCall(body, probe)) return undefined;
+
+    const scheme = this.tp.schemes.get(b.name.id);
+    const resultType =
+      scheme !== undefined && isFun(prune(scheme.type)) ? prune(scheme.type) : undefined;
+    const names = params.map((p) => this.name(p));
+    const types = params.map((p) => {
+      const t = this.tp.varTypes.get(p.id);
+      return t === undefined ? "unknown" : this.ts(t);
+    });
+    const inputs = names.map((n) => this.fresh(`${n}$in`));
+    const state = names.map((n) => this.fresh(`${n}$s`));
+    const loop: Loop = { ...probe, state };
+
+    const arrows = inputs.map((input, i) => {
+      const head = `(${input}: ${types[i] ?? "unknown"})`;
+      if (i === 0 && resultType !== undefined && isFun(resultType)) {
+        return `${typeArgs}${head}: ${this.tsReturn(resultType.args[1])} =>`;
+      }
+      return `${head} =>`;
+    });
+    const inner = `${indent}  `;
+    const lines = [
+      `${arrows.join(" ")} {`,
+      ...state.map(
+        (s, i) => `${inner}let ${s}: ${types[i] ?? "unknown"} = ${inputs[i] ?? "undefined"};`,
+      ),
+      `${inner}for (;;) {`,
+      ...names.map((n, i) => `${inner}  const ${n} = ${state[i] ?? "undefined"};`),
+      ...this.statements(body, `${inner}  `, { gen: false, loop }),
+      `${inner}}`,
+      `${indent}}`,
+    ];
+    return lines.join("\n");
+  }
+
+  /** The arguments of `e` if it is a call that can be a loop iteration of `loop`. */
+  private selfCall(e: CExpr, loop: Loop): Array<CExpr> | undefined {
+    const args: Array<CExpr> = [];
+    let head = e;
+    while (head._tag === "App") {
+      args.unshift(head.arg);
+      head = head.fn;
+    }
+    if (head._tag !== "Var" || head.name.id !== loop.id || args.length !== loop.arity)
+      return undefined;
+    // A call at another type (polymorphic recursion) cannot reuse the loop's state.
+    const targs = this.genericBinders.has(loop.id)
+      ? this.typeArgs(this.tp.schemes.get(loop.id), this.tp.exprTypes.get(head))
+      : "";
+    return targs === loop.typeArgs ? args : undefined;
+  }
+
+  /** Whether `e` has a self call in tail position (outside `Effect.gen`, which is stack-safe). */
+  private hasTailCall(e: CExpr, loop: Loop): boolean {
+    if (this.isIOChain(e)) return false;
+    const inBody = (g: GuardedBody): boolean => {
+      switch (g._tag) {
+        case "Body":
+          return this.hasTailCall(g.expr, loop);
+        case "LetBody":
+          return inBody(g.body);
+        case "Guards":
+          return g.guards.some((x) => this.hasTailCall(x.expr, loop));
+      }
+    };
+    switch (e._tag) {
+      case "Let":
+        return this.hasTailCall(e.body, loop);
+      case "If":
+        return this.hasTailCall(e.thenBranch, loop) || this.hasTailCall(e.elseBranch, loop);
+      case "Match":
+        return e.clauses.some((c) => inBody(c.body));
+      case "Typed":
+        return this.hasTailCall(e.expr, loop);
+      case "App":
+        return this.selfCall(e, loop) !== undefined;
+      default:
+        return false;
+    }
   }
 
   // ---- statements ---------------------------------------------------------------------------
@@ -442,46 +567,60 @@ class Gen {
 
   /** Statements that evaluate `e` and return it. */
   private returns(e: CExpr, indent: string): Array<string> {
-    return this.statements(e, indent, false);
+    return this.statements(e, indent, PURE);
   }
 
   /**
-   * Statements that evaluate `e` and return it. With `inGen`, they are the body of an
+   * Statements that evaluate `e` and return it. With `mode.gen`, they are the body of an
    * `Effect.gen` generator and `e` is an IO action: `>>=` and `>>` become `yield*`
    * statements, and the final action is returned with `return yield*`.
    */
-  private statements(e: CExpr, indent: string, inGen: boolean): Array<string> {
-    if (inGen) {
+  private statements(e: CExpr, indent: string, mode: Mode): Array<string> {
+    if (mode.gen) {
       const step = this.ioStep(e);
       if (step?.kind === "bind") {
         const t = this.tp.varTypes.get(step.param.id);
         const annotation = t === undefined ? "" : `: ${this.ts(t)}`;
         return [
           `${indent}const ${this.name(step.param)}${annotation} = yield* ${this.expr(step.action, indent).code};`,
-          ...this.statements(step.rest, indent, true),
+          ...this.statements(step.rest, indent, mode),
         ];
       }
       if (step?.kind === "then") {
         return [
           `${indent}yield* ${this.expr(step.action, indent).code};`,
-          ...this.statements(step.rest, indent, true),
+          ...this.statements(step.rest, indent, mode),
+        ];
+      }
+    }
+    if (mode.loop !== undefined) {
+      const loop = mode.loop;
+      const args = this.selfCall(e, loop);
+      if (args !== undefined) {
+        // The arguments only refer to this iteration's constants, so assigning the state one
+        // by one is safe.
+        return [
+          ...args.map((a, i) => `${indent}${loop.state[i] ?? ""} = ${this.expr(a, indent).code};`),
+          `${indent}continue;`,
         ];
       }
     }
     switch (e._tag) {
       case "Let":
-        return [...this.group(e.group, indent, false), ...this.statements(e.body, indent, inGen)];
+        return [...this.group(e.group, indent, false), ...this.statements(e.body, indent, mode)];
       case "Match":
-        return this.match(e, indent, inGen);
+        return this.match(e, indent, mode);
       case "If": {
         const branchy = (x: CExpr): boolean =>
-          this.needsStatements(x) || (inGen && this.isIOChain(x));
+          this.needsStatements(x) ||
+          (mode.gen && this.isIOChain(x)) ||
+          (mode.loop !== undefined && this.hasTailCall(x, mode.loop));
         if (branchy(e.thenBranch) || branchy(e.elseBranch)) {
           return [
             `${indent}if (${this.expr(e.cond, indent).code}) {`,
-            ...this.statements(e.thenBranch, `${indent}  `, inGen),
+            ...this.statements(e.thenBranch, `${indent}  `, mode),
             `${indent}}`,
-            ...this.statements(e.elseBranch, indent, inGen),
+            ...this.statements(e.elseBranch, indent, mode),
           ];
         }
         break;
@@ -489,7 +628,7 @@ class Gen {
       default:
         break;
     }
-    if (inGen) {
+    if (mode.gen) {
       // `return x` at the end of a do block is just the value.
       if (
         e._tag === "App" &&
@@ -527,7 +666,7 @@ class Gen {
 
   private gen(e: CExpr, indent: string): Code {
     this.usesEffect = true;
-    const body = this.statements(e, `${indent}  `, true).join("\n");
+    const body = this.statements(e, `${indent}  `, GEN).join("\n");
     return atom(`${this.effect}.gen(function* () {\n${body}\n${indent}})`);
   }
 
@@ -546,7 +685,7 @@ class Gen {
    * fail, a continuation for the rest of the match. Inside `Effect.gen` bodies contain
    * `yield*`, which cannot move into a nested function, so there clauses are duplicated.
    */
-  private match(m: Match, indent: string, inGen: boolean): Array<string> {
+  private match(m: Match, indent: string, mode: Mode): Array<string> {
     const scrutinees = m.scrutinees.map((s) => this.name(s));
     const canFail = m.clauses.map((c) => !this.alwaysReturns(c.body));
     const compiled = this.matcher.compile(
@@ -574,7 +713,7 @@ class Gen {
 
     const out: Array<string> = [];
     const joins = new Map<number, { fn: string; params: ReadonlyArray<Binding> }>();
-    if (!inGen) {
+    if (!mode.gen && mode.loop === undefined) {
       const result = this.ts(this.typeOf(m));
       for (const [clause, { count, bindings }] of leaves) {
         const c = m.clauses[clause];
@@ -589,14 +728,14 @@ class Gen {
         const inner = `${indent}  `;
         out.push(
           `${indent}const ${fn} = (${params.join(", ")}): ${result} => {`,
-          ...this.guarded(c.body, inner, false),
+          ...this.guarded(c.body, inner, PURE),
           ...(canFail[clause] === true ? [`${inner}return ${fail}();`] : []),
           `${indent}};`,
         );
         joins.set(clause, { fn, params: bindings });
       }
     }
-    out.push(...this.decision(compiled.tree, m, indent, inGen, joins));
+    out.push(...this.decision(compiled.tree, m, indent, mode, joins));
     return out;
   }
 
@@ -615,7 +754,7 @@ class Gen {
     d: Decision,
     m: Match,
     indent: string,
-    inGen: boolean,
+    mode: Mode,
     joins: ReadonlyMap<number, { fn: string; params: ReadonlyArray<Binding> }>,
   ): Array<string> {
     const inner = `${indent}  `;
@@ -630,7 +769,7 @@ class Gen {
           );
           if (d.fallback !== undefined) {
             args.push(
-              `() => {\n${this.decision(d.fallback, m, inner, inGen, joins).join("\n")}\n${indent}}`,
+              `() => {\n${this.decision(d.fallback, m, inner, mode, joins).join("\n")}\n${indent}}`,
             );
           }
           return [`${indent}return ${join.fn}(${args.join(", ")});`];
@@ -639,15 +778,15 @@ class Gen {
         if (clause === undefined) return [];
         return [
           ...d.bindings.map((b) => `${indent}const ${this.name(b.name)} = ${b.occ};`),
-          ...this.guarded(clause.body, indent, inGen),
-          ...(d.fallback === undefined ? [] : this.decision(d.fallback, m, indent, inGen, joins)),
+          ...this.guarded(clause.body, indent, mode),
+          ...(d.fallback === undefined ? [] : this.decision(d.fallback, m, indent, mode, joins)),
         ];
       }
       case "Switch": {
         const [only] = d.cases;
         if (d.cases.length === 1 && only !== undefined && d.default === undefined) {
           // The type has a single constructor: nothing to test.
-          return this.decision(only.body, m, indent, inGen, joins);
+          return this.decision(only.body, m, indent, mode, joins);
         }
         if (d.kind === "tag") {
           const out = [`${indent}switch (${d.occ}._tag) {`];
@@ -656,14 +795,14 @@ class Gen {
             const last = i === d.cases.length - 1 && d.default === undefined;
             out.push(
               `${inner}${last ? "default" : `case "${c.test}"`}: {`,
-              ...this.decision(c.body, m, `${inner}  `, inGen, joins),
+              ...this.decision(c.body, m, `${inner}  `, mode, joins),
               `${inner}}`,
             );
           });
           if (d.default !== undefined) {
             out.push(
               `${inner}default: {`,
-              ...this.decision(d.default, m, `${inner}  `, inGen, joins),
+              ...this.decision(d.default, m, `${inner}  `, mode, joins),
               `${inner}}`,
             );
           }
@@ -677,11 +816,11 @@ class Gen {
         for (const a of alternatives) {
           out.push(
             `${indent}if (${a.test}) {`,
-            ...this.decision(a.body, m, inner, inGen, joins),
+            ...this.decision(a.body, m, inner, mode, joins),
             `${indent}}`,
           );
         }
-        if (rest !== undefined) out.push(...this.decision(rest, m, indent, inGen, joins));
+        if (rest !== undefined) out.push(...this.decision(rest, m, indent, mode, joins));
         return out;
       }
     }
@@ -719,22 +858,22 @@ class Gen {
     }
   }
 
-  private guarded(b: GuardedBody, indent: string, inGen: boolean): Array<string> {
+  private guarded(b: GuardedBody, indent: string, mode: Mode): Array<string> {
     switch (b._tag) {
       case "Body":
-        return this.statements(b.expr, indent, inGen);
+        return this.statements(b.expr, indent, mode);
       case "LetBody":
-        return [...this.group(b.group, indent, false), ...this.guarded(b.body, indent, inGen)];
+        return [...this.group(b.group, indent, false), ...this.guarded(b.body, indent, mode)];
       case "Guards": {
         const out: Array<string> = [];
         for (const g of b.guards) {
           if (g.cond._tag === "Con" && g.cond.name === "True") {
-            out.push(...this.statements(g.expr, indent, inGen));
+            out.push(...this.statements(g.expr, indent, mode));
             break;
           }
           out.push(
             `${indent}if (${this.expr(g.cond, indent).code}) {`,
-            ...this.statements(g.expr, `${indent}  `, inGen),
+            ...this.statements(g.expr, `${indent}  `, mode),
             `${indent}}`,
           );
         }

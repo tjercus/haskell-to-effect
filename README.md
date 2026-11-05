@@ -149,9 +149,14 @@ the exceptions:
    - **Arithmetic is `Int` only.**
 3. **`Int` is a JavaScript number.** It is exact up to ±2⁵³ and does not wrap on overflow.
    `div` and `mod` round as in Haskell, and division by zero is an error.
-4. **Recursion depth is limited.** Each non-IO recursive call uses a JavaScript stack
-   frame, so recursion around 10,000 calls deep overflows Node's default stack. IO
-   recursion (loops in `do` blocks) is stack-safe, and the Prelude list functions are loops.
+4. **Some recursion depth is limited.**
+   - **Self tail calls are loops,** so they run at any depth: accumulator loops, `go`
+     helpers, `p x || anyOf p xs`, and calls in `if`, `case` and guards.
+   - **IO recursion** (loops in `do` blocks) is stack-safe.
+   - **The Prelude list functions** are loops.
+   - **Other pure recursion** uses one JavaScript stack frame per call, so it overflows
+     Node's default stack around 10,000 calls deep. That covers non-tail calls like
+     `1 + len xs` and mutual recursion.
 5. **`show` is resolved from static types.** Inside a polymorphic function, where the
    static type is not known, `show` inspects the runtime value instead. That is exact,
    except that the empty string then shows as `[]` instead of `""`.
