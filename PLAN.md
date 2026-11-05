@@ -194,7 +194,7 @@ Each ends with green `vp test` and `vp check`.
    reached from several leaves become join points (with a failure continuation if guarded;
    duplicated inside `Effect.gen`); string literals match character by character.
    GHC-style warnings for non-exhaustive matches (with a witness) and redundant clauses.
-9. **Polish** — code frames, larger golden suite, README listing all deviations from Haskell.
+9. **Polish** — code frames, larger golden suite, README listing all deviations from Haskell. ✅
 
 Stretch: records, `type` synonyms, opt-in laziness.
 

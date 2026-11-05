@@ -1,0 +1,6 @@
+3 4 + => 7
+5 1 2 + 4 * + 3 - => 14
+2 -3 * => -6
+1 + => error: not enough operands for +
+1 2 => error: bad stack: [2,1]
+bye

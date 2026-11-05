@@ -29,3 +29,22 @@ release. Add a tool name to select part of the graph. For example, run
 - [ ] If setup, runtime, or package-manager behavior looks wrong, run `vp env doctor` and include its output when asking for help.
 
 <!--VITE PLUS END-->
+
+# This project: haskell-to-effect
+
+A compiler from a Haskell subset to typed TypeScript on Effect. See `README.md` for the
+language and its differences from Haskell, and `PLAN.md` for design decisions.
+
+- Pipeline: `src/syntax` (lexer, layout, parser) → `src/core` (lowering to Core) →
+  `src/types` (inference) → `src/codegen` (decision trees, TypeScript) → `src/compile.ts`.
+  The CLI is `src/cli.ts`; the runtime copied next to compiled programs is
+  `src/runtime/hs-runtime.ts` (erasable TypeScript only, depends only on `effect`).
+- Every program in the subset must stay valid Haskell, and behave as under GHC except for
+  the documented differences (strict evaluation, no type classes, 53-bit `Int`, …).
+- Prelude functions are declared with Haskell types in `src/prelude.ts` and implemented in
+  the runtime, with type parameters in the order the type variables first appear.
+- Golden tests (`tests/golden/programs/*.hs`) check that generated code passes
+  `tsc --strict` and prints the expected output; expected outputs are what GHC prints,
+  written by hand. Generated output goes to `.hs2effect/` (git-ignored), never under
+  `node_modules` (Node does not strip types there).
+- Core and type snapshots use inline snapshots; review them when they change.
