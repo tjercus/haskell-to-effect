@@ -150,13 +150,14 @@ Pipeline: `lex → layout → parse → rename → desugar → infer → match �
 
 ```
 hs2effect check   <file.hs>                 parse + type-check, report diagnostics
-hs2effect compile <file.hs> [-o <dir>]      write <dir>/Main.ts and <dir>/hs-runtime.ts
-hs2effect run     <file.hs>                 compile to a cache dir inside the package
+hs2effect compile <file.hs> [-o <dir>]      write <dir>/<Module>.ts, hs-runtime.ts, run.ts
+hs2effect run     <file.hs>                 compile into .hs2effect/run/ inside the package
                                             (so `effect` resolves) and run it with Node
 ```
 
-Diagnostics go to stderr with a code frame; exit code 1 on error. `package.json` gets a
-`bin` entry and a second pack entry for `src/cli.ts`.
+Run compiled output with `node <dir>/run.ts` (Node strips the types; `effect` must be
+resolvable from `<dir>`, and `<dir>` must not be under `node_modules`, where Node refuses
+to strip types). Diagnostics go to stderr with a code frame; exit code 1 on error.
 
 ## Milestones
 
@@ -179,7 +180,10 @@ Each ends with green `vp test` and `vp check`.
    recorded types (per expression, per binder, per scheme) for codegen. Done:
    inferred-type tests and error tests. ✅
 6. **Typed TS codegen for pure code + runtime + `compile`/`run` CLI** — first runnable
-   output: `main = print (fac 10)`. Done: golden output passes `tsc --strict` and runs.
+   output: `main = print (fac 10)`. Done: golden output passes `tsc --strict` and runs. ✅
+   Explicit type arguments at every polymorphic call; type-directed `show` matching GHC's
+   output; `>>` defers its second action and top-level IO is suspended, so errors happen
+   in program order despite strict evaluation.
 7. **IO on Effect** — `do`, `getLine`, `putStrLn`, `print`, `>>=`, `return`; tests provide
    a mock `Terminal` layer for stdin/stdout. Done: the example above runs. **← end-to-end**
 8. **Pattern-match compilation** — decision trees, nested patterns, located failures.
@@ -193,7 +197,8 @@ Stretch: records, `type` synonyms, opt-in laziness.
 - **Golden:** compile each `tests/golden/*.hs` → **type-check output with `tsc --strict`**
   → run with the mock `Terminal` (feeding `*.stdin`) → compare to `*.stdout`.
 - **Differential:** if `runghc` is available, run golden programs through GHC as the oracle
-  (all programs in the subset are valid Haskell).
+  (all programs in the subset are valid Haskell). GHC is not installed on the development
+  machine yet, so expected outputs are currently written by hand.
 - **Errors:** ill-formed/ill-typed programs with expected diagnostics.
 
 ## Risks
@@ -201,6 +206,8 @@ Stretch: records, `type` synonyms, opt-in laziness.
 - **Generic TS for HM types:** curried generics and local polymorphic `let`s must produce
   types TS accepts; unannotatable cases fall back to `unknown` + a cast in generated code.
 - **Deep recursion:** strict recursion over long lists can overflow the JS stack;
-  `foldr`/`map`/`length` in the runtime are written iteratively.
+  `foldr`/`map`/`length` in the runtime are written iteratively. User-written recursion is
+  not: one JS frame per call, so depths around 10,000 overflow Node's default stack
+  (tested to 5,000).
 - **Effect 4 API surface** (`Terminal`, `effect/cli`, `NodeRuntime`) — verify exact
   signatures when wiring milestones 6–7.

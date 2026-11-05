@@ -45,3 +45,14 @@ export {
   showType,
   zonk,
 } from "./types/types.ts";
+export { type CodegenOptions, generate } from "./codegen/ts.ts";
+export {
+  type CompileError,
+  type CompileOptions,
+  type Compiled,
+  GenerateError,
+  compile,
+  entrySource,
+  formatError,
+  runtimeSource,
+} from "./compile.ts";

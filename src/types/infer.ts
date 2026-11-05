@@ -53,6 +53,10 @@ export interface TypedProgram {
   readonly varTypes: ReadonlyMap<number, Type>;
   /** Type of every expression node. Call `zonk` before inspecting. */
   readonly exprTypes: ReadonlyMap<CExpr, Type>;
+  /** Type scheme of a Prelude primitive. */
+  readonly primScheme: (name: string) => Scheme | undefined;
+  /** Type scheme of a data constructor (including `[]`, `:`, `()` and tuples). */
+  readonly conScheme: (name: string) => Scheme;
 }
 
 export interface InferOptions {
@@ -355,6 +359,8 @@ class Infer {
       schemes: this.schemes,
       varTypes: this.varTypes,
       exprTypes: this.exprTypes,
+      primScheme: (name) => this.primSchemes.get(name),
+      conScheme: (name) => this.conScheme(name, noSpan),
     };
   }
 

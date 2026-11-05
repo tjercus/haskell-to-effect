@@ -1,0 +1,17 @@
+-5
+[Just (-1),Nothing]
+Left 3
+Right "x"
+BinOp Plus (Num 1) (Neg (Num (-2)))
+Pair 'a' (Pair [True] ())
+"tab\there \"quoted\" \\ done"
+'q'
+'\''
+"\1234\&5 \233"
+""
+[]
+[[1,2],[3]]
+["a","b"]
+Just ""
+Minus
+42!
