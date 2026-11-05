@@ -20,3 +20,9 @@ export class ScopeError extends Data.TaggedError("ScopeError")<{
   readonly message: string;
   readonly span: Span;
 }> {}
+
+/** A program that is not well-typed. */
+export class TypeCheckError extends Data.TaggedError("TypeError")<{
+  readonly message: string;
+  readonly span: Span;
+}> {}

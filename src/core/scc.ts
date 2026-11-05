@@ -57,13 +57,22 @@ export const freeVarIds = (e: CExpr, acc: Set<number> = new Set()): Set<number> 
  * Splits bindings into strongly connected components (Tarjan's algorithm), returned in
  * dependency order: every group only refers to itself and to earlier groups. Bindings that
  * do not depend on each other keep their source order.
+ *
+ * With `ignoreSignatures`, references to bindings that have a type signature are not
+ * dependencies (Haskell 2010 Report, section 4.5.2); the type checker uses this to infer
+ * bindings without signatures before checking the ones that refer to them.
  */
-export const dependencyGroups = (binds: ReadonlyArray<Bind>): Array<BindGroup> => {
+export const dependencyGroups = (
+  binds: ReadonlyArray<Bind>,
+  options: { readonly ignoreSignatures?: boolean } = {},
+): Array<BindGroup> => {
   const index = new Map(binds.map((b, i) => [b.name.id, i]));
   const deps = binds.map((b) =>
     [...freeVarIds(b.expr)].flatMap((id) => {
       const j = index.get(id);
-      return j === undefined ? [] : [j];
+      if (j === undefined) return [];
+      if (options.ignoreSignatures && binds[j]?.sig !== undefined) return [];
+      return [j];
     }),
   );
 

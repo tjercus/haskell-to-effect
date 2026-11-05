@@ -127,9 +127,9 @@ src/
     scc.ts         dependency groups (Tarjan)
     pretty.ts      Core printer for snapshots
   types/
-    infer.ts       Hindley–Milner (algorithm W), let-polymorphism per dependency
-                   group, signature checking
-    elaborate.ts   apply final substitution; record generalised type params per binding
+    types.ts       type representation, zonking, printing
+    infer.ts       Hindley–Milner, let-polymorphism per dependency group, signature
+                   checking; records types for codegen (no separate elaboration pass)
   match.ts         nested patterns → decision trees
   codegen/
     types.ts       Haskell types → TS type syntax
@@ -173,8 +173,11 @@ Each ends with green `vp test` and `vp check`.
 4. **Rename + desugar to Core** — one pass (`core/lower.ts`); dependency analysis (SCCs)
    happens here, so Core `Let`s are already in dependency order. Done: Core snapshots for
    all syntax forms. ✅
-5. **Type inference + elaboration** — HM, SCCs, signature checking, readable type errors
-   (expected vs. actual, with span). Done: inferred-type tests and error tests.
+5. **Type inference + elaboration** — HM with level-based generalisation, rigid
+   signature variables (escape check, polymorphic recursion), Report 4.5.2 splitting of
+   recursive groups at signatures, a light checking mode for better error locations, and
+   recorded types (per expression, per binder, per scheme) for codegen. Done:
+   inferred-type tests and error tests. ✅
 6. **Typed TS codegen for pure code + runtime + `compile`/`run` CLI** — first runnable
    output: `main = print (fac 10)`. Done: golden output passes `tsc --strict` and runs.
 7. **IO on Effect** — `do`, `getLine`, `putStrLn`, `print`, `>>=`, `return`; tests provide

@@ -36,3 +36,12 @@ export type {
 export { lowerModule } from "./core/lower.ts";
 export { prettyCore, prettyProgram } from "./core/pretty.ts";
 export { ScopeError } from "./errors.ts";
+export { TypeCheckError } from "./errors.ts";
+export { type InferOptions, type TypedProgram, inferProgram } from "./types/infer.ts";
+export {
+  type Scheme,
+  type Type as InferredType,
+  showScheme,
+  showType,
+  zonk,
+} from "./types/types.ts";

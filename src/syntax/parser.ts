@@ -161,6 +161,12 @@ class Parser {
     return e;
   }
 
+  typeOnly(): Type {
+    const t = this.type();
+    if (!this.is("EOF")) throw this.unexpected("end of input");
+    return t;
+  }
+
   /** `module → module modid [exports] where body | body` */
   moduleOnly(): Module {
     const start = this.peek().span;
@@ -1003,6 +1009,10 @@ const runParser = <A>(
 /** Parses a whole module, applying the layout rule. */
 export const parseModule = (source: string): Result.Result<Module, LexError | ParseError> =>
   runParser(source, "module", (p) => p.moduleOnly());
+
+/** Parses a type, such as a Prelude signature. */
+export const parseType = (source: string): Result.Result<Type, LexError | ParseError> =>
+  runParser(source, "expression", (p) => p.typeOnly());
 
 /** Parses a single expression, applying the layout rule. */
 export const parseExpr = (source: string): Result.Result<Expr, LexError | ParseError> =>
