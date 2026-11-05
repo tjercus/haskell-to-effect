@@ -113,7 +113,7 @@ export const main: rt.IO<void> = Effect.gen(function* () {
 src/
   syntax/
     lexer.ts       tokens with spans
-    layout.ts      layout rule → virtual { ; }
+    layout.ts      layout rule as a lazy stream → virtual { ; }
     parser.ts      recursive descent + Pratt for operators
     ast.ts         surface AST
   rename.ts        scoping; unbound / duplicate name errors
@@ -157,10 +157,11 @@ Diagnostics go to stderr with a code frame; exit code 1 on error. `package.json`
 Each ends with green `vp test` and `vp check`.
 
 1. **Lexer + expression parser** — literals, application, operators with fixities, lambdas,
-   `if`, `let` with explicit braces. Done: parse→pretty-print round-trips.
-2. **Layout rule** — Report §10.3, with the `parse-error(t)` rule approximated by closing
-   implicit blocks on `in`, `)`, `,`, `then`, `else`, `of`. Done: layout snippets equal
-   their explicitly braced versions.
+   `if`, `let` with explicit braces. Done: parse→pretty-print round-trips. ✅
+2. **Layout rule** — Report §10.3 as a lazy token stream the parser pulls from; the
+   `parse-error(t)` rule is implemented by the parser asking the stream to close the
+   innermost implicit block (as GHC does). Done: layout snippets equal their explicitly
+   braced versions. ✅
 3. **Declarations + patterns** — multi-equation functions, guards, `where`, `data`, `case`,
    signatures.
 4. **Rename + desugar to Core.** Done: Core snapshots for all syntax forms.

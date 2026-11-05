@@ -2,6 +2,7 @@ import { Result } from "effect";
 import { type LexError, ParseError } from "../errors.ts";
 import type { Decl, Expr, Literal, OpRef, Pat, Rhs } from "./ast.ts";
 import { type Fixity, fixityOf, negationFixity, showFixity } from "./fixity.ts";
+import { type LayoutMode, LayoutStream } from "./layout.ts";
 import { lex } from "./lexer.ts";
 import { type Span, merge } from "./span.ts";
 import { type Token, describeToken } from "./token.ts";
@@ -75,14 +76,12 @@ const literalOf = (t: Extract<Token, { _tag: "Int" | "Char" | "String" }>): Lite
 class Parser {
   private i = 0;
 
-  constructor(private readonly tokens: ReadonlyArray<Token>) {}
+  constructor(private readonly stream: LayoutStream) {}
 
   // ---- token helpers ----------------------------------------------------------
 
   private peek(ahead = 0): Token {
-    const last = this.tokens[this.tokens.length - 1];
-    if (last === undefined) throw new Error("Parser: token stream must end with EOF");
-    return this.tokens[this.i + ahead] ?? last;
+    return this.stream.at(this.i + ahead);
   }
 
   private next(): Token {
@@ -213,7 +212,11 @@ class Parser {
 
   private letExpr(): Expr {
     const start = this.next().span;
-    const decls = this.declBlock();
+    const decls = this.block(
+      "a declaration",
+      () => this.isApatStart(),
+      () => this.decl(),
+    );
     this.expect("ReservedId", "in");
     const body = this.exp();
     return { _tag: "Let", decls, body, span: merge(start, body.span) };
@@ -385,44 +388,70 @@ class Parser {
 
   // ---- declarations -------------------------------------------------------------
 
-  /** `{ decl ; … ; decl }` (empty declarations are allowed). */
-  private declBlock(): Array<Decl> {
-    this.expectSpecial("{");
-    const decls: Array<Decl> = [];
+  /**
+   * `{ item ; … ; item }` with explicit or layout-inserted (virtual) braces; empty items are
+   * allowed. In an implicit block, a token that cannot continue the block closes it: this is
+   * the `parse-error(t)` rule of the layout algorithm.
+   */
+  private block<A>(what: string, startsItem: () => boolean, item: () => A): Array<A> {
+    const open = this.peek();
+    if (!(open._tag === "Special" && open.text === "{")) throw this.unexpected(`'{' or ${what}`);
+    this.next();
+    const implicit = open.virtual === true;
+    const isClose = (): boolean => {
+      const t = this.peek();
+      return t._tag === "Special" && t.text === "}" && (t.virtual === true) === implicit;
+    };
+    const closeImplicit = (): Array<A> => {
+      this.stream.closeImplicit(this.i);
+      this.next();
+      return items;
+    };
+
+    const items: Array<A> = [];
     for (;;) {
-      if (this.isSpecial("}")) break;
+      if (isClose()) {
+        this.next();
+        return items;
+      }
       if (this.isSpecial(";")) {
         this.next();
         continue;
       }
-      decls.push(this.decl());
-      if (!this.isSpecial(";") && !this.isSpecial("}")) throw this.unexpected("';' or '}'");
+      if (startsItem()) {
+        items.push(item());
+        if (this.isSpecial(";") || isClose()) continue;
+        if (implicit) return closeImplicit();
+        throw this.unexpected("';' or '}'");
+      }
+      if (implicit) return closeImplicit();
+      throw this.unexpected(`${what} or '}'`);
     }
-    this.next();
-    return decls;
   }
 
   private decl(): Decl {
     const start = this.peek();
     if (start._tag === "VarId") {
-      // Try `f apat* = e`; otherwise fall back to a pattern binding.
+      // `f apat* = e` is a function clause; anything else is a pattern binding.
       const saved = this.i;
+      let params: Array<Pat> | undefined = [];
       try {
         this.next();
-        const params: Array<Pat> = [];
         while (this.isApatStart()) params.push(this.apat());
-        if (this.is("ReservedOp", "=")) {
-          const rhs = this.rhs();
-          return {
-            _tag: "FunClause",
-            name: start.text,
-            params,
-            rhs,
-            span: merge(start.span, rhs.body.span),
-          };
-        }
+        if (!this.is("ReservedOp", "=")) params = undefined;
       } catch (e) {
         if (!(e instanceof ParseError)) throw e;
+        params = undefined;
+      }
+      if (params !== undefined) {
+        const rhs = this.rhs();
+        return {
+          _tag: "FunClause",
+          name: start.text,
+          params,
+          rhs,
+          span: merge(start.span, rhs.body.span),
+        };
       }
       this.i = saved;
     }
@@ -565,18 +594,19 @@ class Parser {
 
 const runParser = <A>(
   source: string,
+  mode: LayoutMode,
   entry: (p: Parser) => A,
 ): Result.Result<A, LexError | ParseError> => {
   const tokens = lex(source);
   if (Result.isFailure(tokens)) return Result.fail(tokens.failure);
   try {
-    return Result.succeed(entry(new Parser(tokens.success)));
+    return Result.succeed(entry(new Parser(new LayoutStream(tokens.success, mode))));
   } catch (e) {
     if (e instanceof ParseError) return Result.fail(e);
     throw e;
   }
 };
 
-/** Parses a single expression (explicit braces only; layout is not applied yet). */
+/** Parses a single expression, applying the layout rule. */
 export const parseExpr = (source: string): Result.Result<Expr, LexError | ParseError> =>
-  runParser(source, (p) => p.expressionOnly());
+  runParser(source, "expression", (p) => p.expressionOnly());

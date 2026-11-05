@@ -35,8 +35,16 @@ export type Token =
   | { readonly _tag: "ConSym"; readonly text: string; readonly span: Span }
   | { readonly _tag: "ReservedId"; readonly text: string; readonly span: Span }
   | { readonly _tag: "ReservedOp"; readonly text: string; readonly span: Span }
-  /** One of `( ) , ; [ ] \` { }`. */
-  | { readonly _tag: "Special"; readonly text: string; readonly span: Span }
+  /**
+   * One of `( ) , ; [ ] \` { }`. Braces and semicolons inserted by the layout rule are
+   * marked `virtual`.
+   */
+  | {
+      readonly _tag: "Special";
+      readonly text: string;
+      readonly span: Span;
+      readonly virtual?: true;
+    }
   | { readonly _tag: "Int"; readonly text: string; readonly value: number; readonly span: Span }
   | { readonly _tag: "Char"; readonly text: string; readonly value: string; readonly span: Span }
   | { readonly _tag: "String"; readonly text: string; readonly value: string; readonly span: Span }
@@ -50,6 +58,13 @@ export const describeToken = (t: Token): string => {
     case "Char":
     case "String":
       return `literal ${t.text}`;
+    case "Special":
+      if (t.virtual) {
+        if (t.text === "{") return "the start of an indented block";
+        if (t.text === ";") return "a new line at the same indentation";
+        return "the end of an indented block";
+      }
+      return `'${t.text}'`;
     default:
       return `'${t.text}'`;
   }
