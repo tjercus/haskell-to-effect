@@ -1,4 +1,16 @@
-import { type Decl, type Expr, type Literal, type Pat, isSymbolic } from "./ast.ts";
+import {
+  type DataDecl,
+  type Decl,
+  type Expr,
+  type Literal,
+  type Module,
+  type Pat,
+  type Rhs,
+  type Stmt,
+  type TopDecl,
+  type Type,
+  isSymbolic,
+} from "./ast.ts";
 import { fixityOf, negationFixity } from "./fixity.ts";
 
 // Precedence contexts, in the style of `showsPrec`:
@@ -85,17 +97,44 @@ export const prettyPat = (p: Pat): string => prettyPatPrec(p, 0);
 
 // ---- expressions & declarations ----------------------------------------------------
 
+const braces = (items: ReadonlyArray<string>): string =>
+  items.length === 0 ? "{}" : `{ ${items.join("; ")} }`;
+
+const prettyRhs = (rhs: Rhs, sep: "=" | "->"): string => {
+  const main =
+    rhs._tag === "Unguarded"
+      ? ` ${sep} ${prettyExpr(rhs.body)}`
+      : rhs.guards.map((g) => ` | ${prettyExpr(g.guard)} ${sep} ${prettyExpr(g.body)}`).join("");
+  return rhs.where.length === 0 ? main : `${main} where ${braces(rhs.where.map(prettyDecl))}`;
+};
+
 export const prettyDecl = (d: Decl): string => {
   switch (d._tag) {
     case "FunClause":
       return (
         [varName(d.name), ...d.params.map((p) => prettyPatPrec(p, 2))].join(" ") +
-        ` = ${prettyExpr(d.rhs.body)}`
+        prettyRhs(d.rhs, "=")
       );
     case "PatBind":
-      return `${prettyPat(d.pat)} = ${prettyExpr(d.rhs.body)}`;
+      return prettyPat(d.pat) + prettyRhs(d.rhs, "=");
+    case "TypeSig":
+      return `${d.names.map(varName).join(", ")} :: ${prettyType(d.type)}`;
   }
 };
+
+const prettyStmt = (st: Stmt): string => {
+  switch (st._tag) {
+    case "BindStmt":
+      return `${prettyPat(st.pat)} <- ${prettyExpr(st.expr)}`;
+    case "LetStmt":
+      return `let ${braces(st.decls.map(prettyDecl))}`;
+    case "ExprStmt":
+      return prettyExpr(st.expr);
+  }
+};
+
+const isOpenEnded = (e: Expr): boolean =>
+  e._tag === "Lambda" || e._tag === "Let" || e._tag === "If" || e._tag === "Typed";
 
 const prettyPrec = (e: Expr, ctx: number): string => {
   switch (e._tag) {
@@ -144,7 +183,62 @@ const prettyPrec = (e: Expr, ctx: number): string => {
       return `(${e.elems.map((x) => prettyPrec(x, 0)).join(", ")})`;
     case "List":
       return `[${e.elems.map((x) => prettyPrec(x, 0)).join(", ")}]`;
+    case "Case": {
+      const alts = e.alts.map((a) => prettyPat(a.pat) + prettyRhs(a.rhs, "->"));
+      return parensIf(ctx >= APP, `case ${prettyPrec(e.scrutinee, 0)} of ${braces(alts)}`);
+    }
+    case "Do":
+      return parensIf(ctx >= APP, `do ${braces(e.stmts.map(prettyStmt))}`);
+    case "Typed":
+      return parensIf(
+        ctx > 0,
+        `${parensIf(isOpenEnded(e.expr), prettyPrec(e.expr, 0))} :: ${prettyType(e.type)}`,
+      );
   }
+};
+
+// ---- types -----------------------------------------------------------------------
+
+// Type contexts: 0 = type, 1 = btype (function or arrow argument), 2 = atype.
+const prettyTypePrec = (t: Type, ctx: number): string => {
+  switch (t._tag) {
+    case "TVar":
+      return t.name;
+    case "TCon":
+      return t.name === "->" ? "(->)" : t.name;
+    case "TApp":
+      return parensIf(ctx > 1, `${prettyTypePrec(t.fn, 1)} ${prettyTypePrec(t.arg, 2)}`);
+    case "TFun":
+      return parensIf(ctx > 0, `${prettyTypePrec(t.from, 1)} -> ${prettyTypePrec(t.to, 0)}`);
+    case "TList":
+      return `[${prettyTypePrec(t.elem, 0)}]`;
+    case "TTuple":
+      return `(${t.elems.map((x) => prettyTypePrec(x, 0)).join(", ")})`;
+  }
+};
+
+export const prettyType = (t: Type): string => prettyTypePrec(t, 0);
+
+// ---- modules -----------------------------------------------------------------------
+
+const prettyDataDecl = (d: DataDecl): string => {
+  const head = ["data", d.name, ...d.params].join(" ");
+  const cons = d.constructors.map((c) =>
+    [c.name, ...c.fields.map((f) => prettyTypePrec(f, 2))].join(" "),
+  );
+  const body = cons.length === 0 ? head : `${head} = ${cons.join(" | ")}`;
+  return d.deriving.length === 0 ? body : `${body} deriving (${d.deriving.join(", ")})`;
+};
+
+export const prettyTopDecl = (d: TopDecl): string =>
+  d._tag === "DataDecl" ? prettyDataDecl(d) : prettyDecl(d);
+
+/** Renders a module on one line with explicit braces. */
+export const prettyModule = (m: Module): string => {
+  const body = braces(m.decls.map(prettyTopDecl));
+  if (m.name === undefined) return body;
+  const exports = m.exports === undefined ? "" : ` (${m.exports.map(varName).join(", ")})`;
+  return `module ${m.name}${exports} where ${body}`;
 };
 
 /** Renders an expression as Haskell source with as few parentheses as fixities allow. */

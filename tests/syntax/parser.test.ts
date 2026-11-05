@@ -120,7 +120,7 @@ describe("parser: errors", () => {
     ["if a then b", /expected 'else'/],
     ["f )", /unexpected '\)', expected end of input/],
     ["[1 ..]", /arithmetic sequences/],
-    ["case x of {}", /not supported yet/],
+    ["case x of {}", /needs at least one alternative/],
   ])("%s", (src, message) => {
     expect(parseErr(src)).toMatch(message);
   });

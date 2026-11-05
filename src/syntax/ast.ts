@@ -78,12 +78,65 @@ export type Expr =
       readonly elseBranch: Expr;
       readonly span: Span;
     }
+  | {
+      readonly _tag: "Case";
+      readonly scrutinee: Expr;
+      readonly alts: ReadonlyArray<Alt>;
+      readonly span: Span;
+    }
+  | { readonly _tag: "Do"; readonly stmts: ReadonlyArray<Stmt>; readonly span: Span }
+  /** Type annotation `e :: t`. */
+  | { readonly _tag: "Typed"; readonly expr: Expr; readonly type: Type; readonly span: Span }
   | { readonly _tag: "Tuple"; readonly elems: ReadonlyArray<Expr>; readonly span: Span }
   | { readonly _tag: "List"; readonly elems: ReadonlyArray<Expr>; readonly span: Span };
 
+/** A `case` alternative `pat -> e` or `pat | guard -> e …`, with optional `where`. */
+export interface Alt {
+  readonly pat: Pat;
+  readonly rhs: Rhs;
+  readonly span: Span;
+}
+
+/** A statement in a `do` block. The last statement of a block is always an `ExprStmt`. */
+export type Stmt =
+  | { readonly _tag: "BindStmt"; readonly pat: Pat; readonly expr: Expr; readonly span: Span }
+  | { readonly _tag: "LetStmt"; readonly decls: ReadonlyArray<Decl>; readonly span: Span }
+  | { readonly _tag: "ExprStmt"; readonly expr: Expr; readonly span: Span };
+
+// ---- types -------------------------------------------------------------------
+
+export type Type =
+  | { readonly _tag: "TVar"; readonly name: string; readonly span: Span }
+  /** Type constructor: `Int`, `Maybe`, and the special `()`, `[]`, `(,)`, `(->)`. */
+  | { readonly _tag: "TCon"; readonly name: string; readonly span: Span }
+  | { readonly _tag: "TApp"; readonly fn: Type; readonly arg: Type; readonly span: Span }
+  | { readonly _tag: "TFun"; readonly from: Type; readonly to: Type; readonly span: Span }
+  | { readonly _tag: "TList"; readonly elem: Type; readonly span: Span }
+  | { readonly _tag: "TTuple"; readonly elems: ReadonlyArray<Type>; readonly span: Span };
+
 // ---- declarations ------------------------------------------------------------
 
-export type Rhs = { readonly _tag: "Unguarded"; readonly body: Expr };
+/** `| guard = body` (or `->` in a case alternative). */
+export interface GuardedExpr {
+  readonly guard: Expr;
+  readonly body: Expr;
+  readonly span: Span;
+}
+
+/** The right-hand side of an equation or case alternative, with its `where` bindings. */
+export type Rhs =
+  | {
+      readonly _tag: "Unguarded";
+      readonly body: Expr;
+      readonly where: ReadonlyArray<Decl>;
+      readonly span: Span;
+    }
+  | {
+      readonly _tag: "Guarded";
+      readonly guards: ReadonlyArray<GuardedExpr>;
+      readonly where: ReadonlyArray<Decl>;
+      readonly span: Span;
+    };
 
 export type Decl =
   /** One equation of a function (or a simple variable binding when `params` is empty). */
@@ -95,7 +148,43 @@ export type Decl =
       readonly span: Span;
     }
   /** A pattern binding such as `(a, b) = e`. */
-  | { readonly _tag: "PatBind"; readonly pat: Pat; readonly rhs: Rhs; readonly span: Span };
+  | { readonly _tag: "PatBind"; readonly pat: Pat; readonly rhs: Rhs; readonly span: Span }
+  /** `f, g :: t` */
+  | {
+      readonly _tag: "TypeSig";
+      readonly names: ReadonlyArray<string>;
+      readonly type: Type;
+      readonly span: Span;
+    };
+
+/** A data constructor declaration `C t1 … tn` (positional fields only). */
+export interface ConDecl {
+  readonly name: string;
+  readonly fields: ReadonlyArray<Type>;
+  readonly span: Span;
+}
+
+/** `data T a b = C1 … | C2 … deriving (…)` */
+export interface DataDecl {
+  readonly _tag: "DataDecl";
+  readonly name: string;
+  readonly params: ReadonlyArray<string>;
+  readonly constructors: ReadonlyArray<ConDecl>;
+  /** Class names in the `deriving` clause; accepted for GHC compatibility. */
+  readonly deriving: ReadonlyArray<string>;
+  readonly span: Span;
+}
+
+export type TopDecl = Decl | DataDecl;
+
+export interface Module {
+  /** `undefined` when the module header is omitted (the module is then `Main`). */
+  readonly name: string | undefined;
+  /** The export list, if any; names only. */
+  readonly exports: ReadonlyArray<string> | undefined;
+  readonly decls: ReadonlyArray<TopDecl>;
+  readonly span: Span;
+}
 
 // ---- helpers -----------------------------------------------------------------
 

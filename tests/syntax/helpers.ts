@@ -1,6 +1,7 @@
 import { Result } from "effect";
-import type { Expr, Pat } from "../../src/syntax/ast.ts";
+import type { Decl, Expr, Pat, Rhs } from "../../src/syntax/ast.ts";
 import { parseExpr } from "../../src/syntax/parser.ts";
+import { prettyType } from "../../src/syntax/pretty.ts";
 
 /** Parses or throws, so tests can focus on the result. */
 export const parseOk = (src: string): Expr => {
@@ -69,18 +70,45 @@ export const sexpr = (e: Expr): string => {
     case "Lambda":
       return `(\\ ${e.params.map(pat).join(" ")} -> ${sexpr(e.body)})`;
     case "Let":
-      return `(let [${e.decls
-        .map((d) =>
-          d._tag === "FunClause"
-            ? `${[d.name, ...d.params.map(pat)].join(" ")} = ${sexpr(d.rhs.body)}`
-            : `${pat(d.pat)} = ${sexpr(d.rhs.body)}`,
-        )
-        .join("; ")}] ${sexpr(e.body)})`;
+      return `(let [${e.decls.map(sdecl).join("; ")}] ${sexpr(e.body)})`;
     case "If":
       return `(if ${sexpr(e.cond)} ${sexpr(e.thenBranch)} ${sexpr(e.elseBranch)})`;
     case "Tuple":
       return `(tuple ${e.elems.map(sexpr).join(" ")})`;
     case "List":
       return `(list ${e.elems.map(sexpr).join(" ")})`;
+    case "Case":
+      return `(case ${sexpr(e.scrutinee)} ${e.alts.map((a) => `[${pat(a.pat)}${srhs(a.rhs, "->")}]`).join(" ")})`;
+    case "Do":
+      return `(do ${e.stmts
+        .map((st) =>
+          st._tag === "BindStmt"
+            ? `[${pat(st.pat)} <- ${sexpr(st.expr)}]`
+            : st._tag === "LetStmt"
+              ? `[let ${st.decls.map(sdecl).join("; ")}]`
+              : `[${sexpr(st.expr)}]`,
+        )
+        .join(" ")})`;
+    case "Typed":
+      return `(:: ${sexpr(e.expr)} ${prettyType(e.type)})`;
+  }
+};
+
+const srhs = (rhs: Rhs, sep: string): string => {
+  const main =
+    rhs._tag === "Unguarded"
+      ? ` ${sep} ${sexpr(rhs.body)}`
+      : rhs.guards.map((g) => ` | ${sexpr(g.guard)} ${sep} ${sexpr(g.body)}`).join("");
+  return rhs.where.length === 0 ? main : `${main} where [${rhs.where.map(sdecl).join("; ")}]`;
+};
+
+const sdecl = (d: Decl): string => {
+  switch (d._tag) {
+    case "FunClause":
+      return [d.name, ...d.params.map(pat)].join(" ") + srhs(d.rhs, "=");
+    case "PatBind":
+      return pat(d.pat) + srhs(d.rhs, "=");
+    case "TypeSig":
+      return `${d.names.join(", ")} :: ${prettyType(d.type)}`;
   }
 };

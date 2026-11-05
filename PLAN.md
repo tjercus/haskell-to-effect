@@ -18,16 +18,19 @@ generically-typed TS functions. Delivered as a CLI (`hs2effect`).
 
 - **Module:** a single `module Main where`; no imports; fixed built-in Prelude.
 - **Declarations:** top-level functions (multiple equations), optional type signatures,
-  `data T a = C1 t | C2 t t` (positional fields, type parameters allowed).
+  `data T a = C1 t | C2 t t` (positional fields, type parameters allowed). `deriving`
+  clauses are accepted and ignored (`show`/`==` are built in), so programs stay valid for GHC.
 - **Expressions:** literals (`Int`, `Char`, `String`, `Bool`), application, lambdas,
   `let … in`, `where`, `if`, `case`, operator sections, list literals, tuples, `do`.
-- **Patterns:** var, `_`, literals, constructors, `x:xs`, `[]`, tuples, nested; guards incl. `otherwise`.
+- **Patterns:** var, `_`, literals, constructors, `x:xs`, `[]`, tuples, as-patterns, nested;
+  boolean guards incl. `otherwise` (no pattern guards).
+- **Type annotations:** `e :: t`.
 - **Operators (fixed Report fixities):** `. $ || && == /= < <= > >= : ++ + - * `div` `mod``.
 - **Layout:** layout rule for `where`/`let`/`do`/`of`, plus explicit `{ ; }`.
 - **Prelude:** `putStrLn print getLine return >>= >> show map filter foldr length head tail
   error div mod not fst snd id const`.
 
-Out of scope: type classes/instances, `deriving`, records, `newtype`, `type` synonyms,
+Out of scope: type classes/instances, records, `newtype`, `type` synonyms,
 modules/imports, user operators/fixity, list comprehensions, `Integer`/`Double`, extensions.
 
 ## Haskell → TypeScript mapping
@@ -162,8 +165,8 @@ Each ends with green `vp test` and `vp check`.
    `parse-error(t)` rule is implemented by the parser asking the stream to close the
    innermost implicit block (as GHC does). Done: layout snippets equal their explicitly
    braced versions. ✅
-3. **Declarations + patterns** — multi-equation functions, guards, `where`, `data`, `case`,
-   signatures.
+3. **Declarations + patterns** — module header, multi-equation functions, guards, `where`,
+   `data`, `case`, signatures, and `do` syntax (semantics in milestone 7). ✅
 4. **Rename + desugar to Core.** Done: Core snapshots for all syntax forms.
 5. **Type inference + elaboration** — HM, SCCs, signature checking, readable type errors
    (expected vs. actual, with span). Done: inferred-type tests and error tests.
@@ -174,7 +177,7 @@ Each ends with green `vp test` and `vp check`.
 8. **Pattern-match compilation** — decision trees, nested patterns, located failures.
 9. **Polish** — code frames, larger golden suite, README listing all deviations from Haskell.
 
-Stretch: `deriving (Show, Eq)` as sugar, records, `type` synonyms, opt-in laziness.
+Stretch: records, `type` synonyms, opt-in laziness.
 
 ## Testing
 
