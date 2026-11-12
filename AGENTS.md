@@ -7,7 +7,7 @@ checking signatures, or looking up how something is done. Prefer it over memory 
 searches, because Effect 4 differs a lot from Effect 3.
 
 - **What it is:** a clone of https://github.com/Effect-TS/effect, checked out at the tag
-  that matches the installed `effect` version (`effect@4.1.2`). It is git-ignored.
+  that matches the installed `effect` version (`effect@4.1.4`). It is git-ignored.
 - **Where to look:**
   - `packages/effect/src/`: the `effect` package. Unstable modules, such as `cli`, are in
     subdirectories.
