@@ -212,7 +212,17 @@ source → lexer → layout → parser → lowering → type inference → code 
   - **Types:** polymorphic bindings become generic arrow functions with explicit type
     arguments at every call, and `show` is type-directed.
   - **Pattern matching:** matches become decision trees (Maranget's algorithm), with
-    exhaustiveness and redundancy warnings.
+    exhaustiveness and redundancy warnings. The trees compile to `switch (x._tag)` and
+    `if`, not Effect's `Match` module, for these reasons:
+    - Case bodies in generator code (`Effect.gen`, and the trampolined versions of
+      recursive functions) contain `yield`, which cannot cross the callbacks that `Match`
+      handlers are.
+    - A decision tree has nested tests, join points and guard fall-through, which map
+      directly to `switch`, while `Match` describes a flat list of clauses on one value.
+    - Narrowing on `_tag` already type-checks field accesses, and `tsc --strict` proves
+      exhaustiveness.
+    - A `switch` costs nothing at runtime, while `Match` builds a matcher and closures on
+      every call, including in hot recursive functions.
   - **IO:** `do` blocks become `Effect.gen`.
   - **Recursion:** tail calls become loops. Functions with other recursive calls also get
     a generator version that runs on a trampoline once the recursion is deep.
