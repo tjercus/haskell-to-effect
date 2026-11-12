@@ -5,7 +5,9 @@ import type { Token } from "../../src/syntax/token.ts";
 
 const tokens = (src: string): Array<Token> => {
   const r = lex(src);
-  if (Result.isFailure(r)) throw new Error(r.failure.message);
+  if (Result.isFailure(r)) {
+    throw new Error(r.failure.message);
+  }
   return [...r.success];
 };
 
@@ -17,7 +19,9 @@ const kinds = (src: string): Array<string> =>
 
 const lexErr = (src: string): string => {
   const r = lex(src);
-  if (Result.isSuccess(r)) throw new Error(`expected a lex error for: ${src}`);
+  if (Result.isSuccess(r)) {
+    throw new Error(`expected a lex error for: ${src}`);
+  }
   return r.failure.message;
 };
 

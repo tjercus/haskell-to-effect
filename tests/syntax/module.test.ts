@@ -9,13 +9,17 @@ const lines = (...ls: Array<string>): string => ls.join("\n");
 
 const moduleOk = (src: string): Module => {
   const r = parseModule(src);
-  if (Result.isFailure(r)) throw new Error(`parse failed: ${r.failure.message}`);
+  if (Result.isFailure(r)) {
+    throw new Error(`parse failed: ${r.failure.message}`);
+  }
   return r.success;
 };
 
 const moduleErr = (src: string): string => {
   const r = parseModule(src);
-  if (Result.isSuccess(r)) throw new Error(`expected a parse error for: ${src}`);
+  if (Result.isSuccess(r)) {
+    throw new Error(`expected a parse error for: ${src}`);
+  }
   return r.failure.message;
 };
 

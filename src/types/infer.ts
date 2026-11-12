@@ -95,7 +95,9 @@ class Infer {
   ]);
 
   constructor(private readonly program: Program) {
-    for (const d of program.data) this.typeArity.set(d.name, d.params.length);
+    for (const d of program.data) {
+      this.typeArity.set(d.name, d.params.length);
+    }
     for (const d of program.data) {
       const vars = d.params.map((p) => this.rigid(p, GENERIC));
       const env = new Map(d.params.map((p, i): [string, Type] => [p, vars[i] ?? tUnit]));
@@ -107,8 +109,9 @@ class Infer {
     }
     for (const p of prims) {
       const parsed = parseType(p.type);
-      if (Result.isFailure(parsed))
+      if (Result.isFailure(parsed)) {
         throw new Error(`invalid Prelude type for ${p.name}: ${p.type}`);
+      }
       const vars: Array<TVar> = [];
       const type = this.convert(parsed.success, new Map(), (name) => {
         const v = this.rigid(name, GENERIC);
@@ -131,7 +134,9 @@ class Infer {
   }
 
   private instantiate(s: Scheme): Type {
-    if (s.vars.length === 0) return s.type;
+    if (s.vars.length === 0) {
+      return s.type;
+    }
     return substVars(s.type, new Map(s.vars.map((v) => [v.id, this.meta()])));
   }
 
@@ -149,17 +154,26 @@ class Infer {
         all.push(v);
         p.ref.link = v;
       } else if (p._tag === "TCon") {
-        for (const a of p.args) bind(a);
+        for (const a of p.args) {
+          bind(a);
+        }
       }
     };
-    for (const t of types) bind(t);
+    for (const t of types) {
+      bind(t);
+    }
     const generalized = new Set(all.map((v) => v.id));
     return types.map((t) => {
       const type = zonk(t);
       const vars: Array<TVar> = [];
       const collect = (ty: Type): void => {
-        if (ty._tag === "TVar" && generalized.has(ty.id) && !vars.includes(ty)) vars.push(ty);
-        else if (ty._tag === "TCon") for (const a of ty.args) collect(a);
+        if (ty._tag === "TVar" && generalized.has(ty.id) && !vars.includes(ty)) {
+          vars.push(ty);
+        } else if (ty._tag === "TCon") {
+          for (const a of ty.args) {
+            collect(a);
+          }
+        }
       };
       collect(type);
       return { vars, type };
@@ -168,13 +182,23 @@ class Infer {
 
   private conScheme(name: string, span: Span): Scheme {
     const known = this.conSchemes.get(name);
-    if (known !== undefined) return known;
+    if (known !== undefined) {
+      return known;
+    }
     const a = this.rigid("a", GENERIC);
-    if (name === "()") return { vars: [], type: tUnit };
-    if (name === "[]") return { vars: [a], type: tList(a) };
-    if (name === ":") return { vars: [a], type: tFuns([a, tList(a)], tList(a)) };
+    if (name === "()") {
+      return { vars: [], type: tUnit };
+    }
+    if (name === "[]") {
+      return { vars: [a], type: tList(a) };
+    }
+    if (name === ":") {
+      return { vars: [a], type: tFuns([a, tList(a)], tList(a)) };
+    }
     const arity = tupleArity(name);
-    if (arity === undefined) return this.fail(`unknown constructor '${name}'`, span);
+    if (arity === undefined) {
+      return this.fail(`unknown constructor '${name}'`, span);
+    }
     const vars = Array.from({ length: arity }, (_, i) => this.rigid(varNames(i), GENERIC));
     const scheme: Scheme = { vars, type: tFuns(vars, con(name, ...vars)) };
     this.conSchemes.set(name, scheme);
@@ -218,23 +242,32 @@ class Infer {
             );
           }
           const known = vars.get(head.name);
-          if (known !== undefined) return known;
-          if (freshVar === undefined)
+          if (known !== undefined) {
+            return known;
+          }
+          if (freshVar === undefined) {
             return this.fail(`type variable not in scope: '${head.name}'`, head.span);
+          }
           const v = freshVar(head.name);
           vars.set(head.name, v);
           return v;
         }
-        if (head._tag !== "TCon") return go(head);
+        if (head._tag !== "TCon") {
+          return go(head);
+        }
         const arity = this.typeArity.get(head.name) ?? tupleArity(head.name);
-        if (arity === undefined) return this.fail(`type not in scope: '${head.name}'`, head.span);
+        if (arity === undefined) {
+          return this.fail(`type not in scope: '${head.name}'`, head.span);
+        }
         if (args.length !== arity) {
           this.fail(
             `the type '${head.name}' expects ${arity} argument${arity === 1 ? "" : "s"}, but has been given ${args.length}`,
             t.span,
           );
         }
-        if (head.name === "String") return tString;
+        if (head.name === "String") {
+          return tString;
+        }
         return con(head.name, ...args.map(go));
       }
     }
@@ -265,7 +298,9 @@ class Infer {
     try {
       this.unifyInner(expected, actual);
     } catch (e) {
-      if (!(e instanceof Mismatch)) throw e;
+      if (!(e instanceof Mismatch)) {
+        throw e;
+      }
       const printer = new TypePrinter();
       const exp = printer.print(expected);
       const act = printer.print(actual);
@@ -281,10 +316,18 @@ class Infer {
   private unifyInner(a0: Type, b0: Type): void {
     const a = prune(a0);
     const b = prune(b0);
-    if (a._tag === "TMeta" && b._tag === "TMeta" && a.ref === b.ref) return;
-    if (a._tag === "TMeta") return this.bindMeta(a.ref, b);
-    if (b._tag === "TMeta") return this.bindMeta(b.ref, a);
-    if (a._tag === "TVar" && b._tag === "TVar" && a.id === b.id) return;
+    if (a._tag === "TMeta" && b._tag === "TMeta" && a.ref === b.ref) {
+      return;
+    }
+    if (a._tag === "TMeta") {
+      return this.bindMeta(a.ref, b);
+    }
+    if (b._tag === "TMeta") {
+      return this.bindMeta(b.ref, a);
+    }
+    if (a._tag === "TVar" && b._tag === "TVar" && a.id === b.id) {
+      return;
+    }
     if (
       a._tag === "TCon" &&
       b._tag === "TCon" &&
@@ -293,7 +336,9 @@ class Infer {
     ) {
       a.args.forEach((x, i) => {
         const y = b.args[i];
-        if (y !== undefined) this.unifyInner(x, y);
+        if (y !== undefined) {
+          this.unifyInner(x, y);
+        }
       });
       return;
     }
@@ -324,7 +369,9 @@ class Infer {
           );
         }
       } else {
-        for (const x of p.args) check(x);
+        for (const x of p.args) {
+          check(x);
+        }
       }
     };
     check(t);
@@ -334,10 +381,14 @@ class Infer {
   // ---- programs and binding groups --------------------------------------------------------
 
   run(requireMain: boolean): TypedProgram {
-    for (const g of this.program.groups) this.inferBinds(bindsOf(g));
+    for (const g of this.program.groups) {
+      this.inferBinds(bindsOf(g));
+    }
     const main = this.program.groups.flatMap(bindsOf).find((b) => b.name.text === "main");
     if (main === undefined) {
-      if (requireMain) this.fail("the module does not define 'main'", noSpan);
+      if (requireMain) {
+        this.fail("the module does not define 'main'", noSpan);
+      }
     } else {
       const scheme = this.schemes.get(main.name.id);
       if (scheme !== undefined) {
@@ -346,7 +397,9 @@ class Infer {
         try {
           this.unifyInner(tIO(result), t);
         } catch (e) {
-          if (!(e instanceof Mismatch)) throw e;
+          if (!(e instanceof Mismatch)) {
+            throw e;
+          }
           this.fail(
             `'main' must have type 'IO t', but it has type '${new TypePrinter().print(t)}'`,
             main.span,
@@ -369,7 +422,9 @@ class Infer {
     // Signatures are known up front, so every binding can use them polymorphically.
     const declared = new Map<number, Scheme>();
     for (const b of binds) {
-      if (b.sig === undefined) continue;
+      if (b.sig === undefined) {
+        continue;
+      }
       const scheme = this.sigScheme(b.sig, this.level + 1);
       declared.set(b.name.id, scheme);
       this.schemes.set(b.name.id, scheme);
@@ -377,8 +432,11 @@ class Infer {
     for (const sub of dependencyGroups(binds, { ignoreSignatures: true })) {
       const members = bindsOf(sub);
       this.level++;
-      for (const b of members)
-        if (!declared.has(b.name.id)) this.pending.set(b.name.id, this.meta());
+      for (const b of members) {
+        if (!declared.has(b.name.id)) {
+          this.pending.set(b.name.id, this.meta());
+        }
+      }
       for (const b of members) {
         const sig = declared.get(b.name.id);
         if (sig !== undefined) {
@@ -405,7 +463,9 @@ class Infer {
       const generalized = this.generalizeGroup(inferred.map((x) => x.mono));
       inferred.forEach(({ b }, i) => {
         const scheme = generalized[i];
-        if (scheme !== undefined) this.schemes.set(b.name.id, scheme);
+        if (scheme !== undefined) {
+          this.schemes.set(b.name.id, scheme);
+        }
       });
     }
   }
@@ -414,9 +474,13 @@ class Infer {
 
   private lookupVar(id: number, text: string, span: Span): Type {
     const mono = this.pending.get(id) ?? this.varTypes.get(id);
-    if (mono !== undefined) return mono;
+    if (mono !== undefined) {
+      return mono;
+    }
     const scheme = this.schemes.get(id);
-    if (scheme === undefined) return this.fail(`internal: no type for '${text}'`, span);
+    if (scheme === undefined) {
+      return this.fail(`internal: no type for '${text}'`, span);
+    }
     return this.instantiate(scheme);
   }
 
@@ -429,7 +493,9 @@ class Infer {
     const exp = prune(expected);
     switch (e._tag) {
       case "Lam":
-        if (!isFun(exp)) break;
+        if (!isFun(exp)) {
+          break;
+        }
         this.varTypes.set(e.param.id, exp.args[0]);
         this.checkExpr(e.body, exp.args[1], what);
         this.exprTypes.set(e, expected);
@@ -468,7 +534,9 @@ class Infer {
         return this.lookupVar(e.name.id, e.name.text, e.span);
       case "Prim": {
         const s = this.primSchemes.get(e.name);
-        if (s === undefined) return this.fail(`internal: unknown primitive '${e.name}'`, e.span);
+        if (s === undefined) {
+          return this.fail(`internal: unknown primitive '${e.name}'`, e.span);
+        }
         return this.instantiate(s);
       }
       case "Con":
@@ -551,7 +619,9 @@ class Infer {
       const what =
         headName === undefined ? "in a function argument" : `in argument ${i + 1} of '${headName}'`;
       this.checkExpr(app.arg, param, what);
-      if (app !== e) this.exprTypes.set(app, result);
+      if (app !== e) {
+        this.exprTypes.set(app, result);
+      }
       fnType = result;
     });
     return fnType;
@@ -610,8 +680,9 @@ class Infer {
         const params: Array<Type> = [];
         for (let i = 0; i < p.args.length; i++) {
           const f = prune(t);
-          if (!isFun(f))
+          if (!isFun(f)) {
             return this.fail(`internal: constructor '${p.name}' has too few fields`, p.span);
+          }
           params.push(f.args[0]);
           t = f.args[1];
         }
@@ -630,7 +701,9 @@ export const inferProgram = (
   try {
     return Result.succeed(new Infer(program).run(options.requireMain ?? true));
   } catch (e) {
-    if (e instanceof TypeCheckError) return Result.fail(e);
+    if (e instanceof TypeCheckError) {
+      return Result.fail(e);
+    }
     throw e;
   }
 };

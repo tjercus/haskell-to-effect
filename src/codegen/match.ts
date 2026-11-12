@@ -105,8 +105,9 @@ export class MatchCompiler {
   private guarded: ReadonlyArray<boolean> = [];
 
   constructor(data: ReadonlyArray<DataInfo>) {
-    for (const d of data)
+    for (const d of data) {
       d.constructors.forEach((c, index) => this.cons.set(c.name, { data: d, index }));
+    }
   }
 
   /**
@@ -130,11 +131,19 @@ export class MatchCompiler {
   // ---- signatures -----------------------------------------------------------------------
 
   private signature(con: string): Signature {
-    if (con === "True" || con === "False") return { kind: "bool", all: ["False", "True"] };
-    if (con === "[]" || con === ":") return { kind: "tag", all: ["[]", ":"] };
-    if (con === "()" || tupleArity(con) !== undefined) return { kind: "product", all: [con] };
+    if (con === "True" || con === "False") {
+      return { kind: "bool", all: ["False", "True"] };
+    }
+    if (con === "[]" || con === ":") {
+      return { kind: "tag", all: ["[]", ":"] };
+    }
+    if (con === "()" || tupleArity(con) !== undefined) {
+      return { kind: "product", all: [con] };
+    }
     const info = this.cons.get(con);
-    if (info === undefined) return { kind: "tag", all: undefined };
+    if (info === undefined) {
+      return { kind: "tag", all: undefined };
+    }
     return { kind: "tag", all: info.data.constructors.map((c) => c.name) };
   }
 
@@ -156,8 +165,9 @@ export class MatchCompiler {
         return { name, arity: 0, test: undefined, child: field };
     }
     const tuple = tupleArity(name);
-    if (tuple !== undefined)
+    if (tuple !== undefined) {
       return { name, arity: tuple, test: undefined, child: (occ, i) => `${occ}[${i}]` };
+    }
     const info = this.cons.get(name);
     return {
       name,
@@ -175,7 +185,9 @@ export class MatchCompiler {
     const pats = row.pats.map((p0, i) => {
       let p = p0;
       for (;;) {
-        if (p === undefined || p._tag === "PWildcard") return undefined;
+        if (p === undefined || p._tag === "PWildcard") {
+          return undefined;
+        }
         if (p._tag === "PVar") {
           bindings.push({ name: p.name, occ: occs[i] ?? "" });
           return undefined;
@@ -216,9 +228,13 @@ export class MatchCompiler {
 
     const occ = occs[col] ?? "";
     const head = first.pats[col];
-    if (head === undefined) return { _tag: "Fail" };
+    if (head === undefined) {
+      return { _tag: "Fail" };
+    }
 
-    if (head._tag === "PLit") return this.literalSwitch(occs, rows, col, facts);
+    if (head._tag === "PLit") {
+      return this.literalSwitch(occs, rows, col, facts);
+    }
 
     const name = head._tag === "PCon" ? head.name : "";
     const sig = this.signature(name);
@@ -238,7 +254,9 @@ export class MatchCompiler {
     const present = new Set<string>();
     for (const r of rows) {
       const p = r.pats[col];
-      if (p?._tag === "PCon") present.add(p.name);
+      if (p?._tag === "PCon") {
+        present.add(p.name);
+      }
     }
     const heads = (sig.all ?? [...present]).filter((c) => present.has(c));
     const cases = heads.map((h) => {
@@ -281,12 +299,16 @@ export class MatchCompiler {
     const lits: Array<Literal> = [];
     for (const r of rows) {
       const p = r.pats[col];
-      if (p?._tag === "PLit" && !lits.some((l) => l.value === p.lit.value)) lits.push(p.lit);
+      if (p?._tag === "PLit" && !lits.some((l) => l.value === p.lit.value)) {
+        lits.push(p.lit);
+      }
     }
     const cases = lits.map((lit) => {
       const keep = rows.flatMap((r): Array<Row> => {
         const p = r.pats[col];
-        if (p !== undefined && !(p._tag === "PLit" && p.lit.value === lit.value)) return [];
+        if (p !== undefined && !(p._tag === "PLit" && p.lit.value === lit.value)) {
+          return [];
+        }
         return [{ ...r, pats: r.pats.filter((_, i) => i !== col) }];
       });
       return {
@@ -325,9 +347,13 @@ export class MatchCompiler {
     return rows.flatMap((r): Array<Row> => {
       const p = r.pats[col];
       let fields: ReadonlyArray<CPat | undefined>;
-      if (p === undefined) fields = Array.from({ length: arity }, () => undefined);
-      else if (p._tag === "PCon" && p.name === name) fields = p.args;
-      else return [];
+      if (p === undefined) {
+        fields = Array.from({ length: arity }, () => undefined);
+      } else if (p._tag === "PCon" && p.name === name) {
+        fields = p.args;
+      } else {
+        return [];
+      }
       return [{ ...r, pats: [...r.pats.slice(0, col), ...fields, ...r.pats.slice(col + 1)] }];
     });
   }
@@ -335,7 +361,9 @@ export class MatchCompiler {
   /** Rows with a wildcard at `col`, without the column. */
   private defaults(rows: ReadonlyArray<Row>, col: number): Array<Row> {
     return rows.flatMap((r): Array<Row> => {
-      if (r.pats[col] !== undefined) return [];
+      if (r.pats[col] !== undefined) {
+        return [];
+      }
       return [{ ...r, pats: r.pats.filter((_, i) => i !== col) }];
     });
   }
@@ -345,13 +373,17 @@ export class MatchCompiler {
   /** A pattern describing the values of `occ` that reach the current point. */
   private witness(occ: Occurrence, facts: ReadonlyMap<Occurrence, Fact>, top: boolean): string {
     const fact = facts.get(occ);
-    if (fact === undefined) return "_";
+    if (fact === undefined) {
+      return "_";
+    }
     switch (fact._tag) {
       case "IsLit":
         return prettyLiteral(fact.lit);
       case "Not": {
         const missing = fact.sig.all?.find((c) => !fact.cons.includes(c));
-        if (missing === undefined) return "_";
+        if (missing === undefined) {
+          return "_";
+        }
         const arity = this.con(missing).arity;
         return this.showCon(
           missing,
@@ -369,12 +401,16 @@ export class MatchCompiler {
   }
 
   private showCon(name: string, args: ReadonlyArray<string>, top: boolean): string {
-    if (tupleArity(name) !== undefined) return `(${args.join(", ")})`;
+    if (tupleArity(name) !== undefined) {
+      return `(${args.join(", ")})`;
+    }
     if (name === ":") {
       const s = `${args[0] ?? "_"} : ${args[1] ?? "_"}`;
       return top ? s : `(${s})`;
     }
-    if (args.length === 0) return name;
+    if (args.length === 0) {
+      return name;
+    }
     const s = `${name} ${args.join(" ")}`;
     return top ? s : `(${s})`;
   }

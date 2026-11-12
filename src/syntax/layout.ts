@@ -113,12 +113,16 @@ export class LayoutStream {
   at(k: number): Token {
     while (this.out.length <= k) {
       const last = this.out[this.out.length - 1];
-      if (last?._tag === "EOF") return last;
+      if (last?._tag === "EOF") {
+        return last;
+      }
       this.before.push(this.state);
       this.out.push(this.produce());
     }
     const t = this.out[k];
-    if (t === undefined) throw new Error("LayoutStream: unreachable");
+    if (t === undefined) {
+      throw new Error("LayoutStream: unreachable");
+    }
     return t;
   }
 
@@ -136,11 +140,14 @@ export class LayoutStream {
    * context popped; `out[k]` becomes a virtual `}`.
    */
   closeImplicit(k: number): void {
-    if (!this.inImplicitBlock(k))
+    if (!this.inImplicitBlock(k)) {
       throw new Error("LayoutStream.closeImplicit: no implicit block to close");
+    }
     const st = this.before[k];
     const t = this.out[k];
-    if (st === undefined || t === undefined) throw new Error("LayoutStream: unreachable");
+    if (st === undefined || t === undefined) {
+      throw new Error("LayoutStream: unreachable");
+    }
     this.out.length = k;
     this.before.length = k;
     this.before.push(st);
@@ -162,7 +169,9 @@ export class LayoutStream {
           : { pos: pos + 1, stack, queue, ...extra };
       };
 
-      if (item === undefined) throw new Error("LayoutStream: input must end with EOF");
+      if (item === undefined) {
+        throw new Error("LayoutStream: input must end with EOF");
+      }
 
       if (item._tag === "Indent") {
         if (top !== undefined && item.n === top) {
@@ -227,6 +236,8 @@ export const layoutAll = (tokens: ReadonlyArray<Token>, mode: LayoutMode): Array
   for (let k = 0; ; k++) {
     const t = stream.at(k);
     out.push(t);
-    if (t._tag === "EOF") return out;
+    if (t._tag === "EOF") {
+      return out;
+    }
   }
 };

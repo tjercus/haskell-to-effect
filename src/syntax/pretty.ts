@@ -84,7 +84,9 @@ const prettyPatPrec = (p: Pat, ctx: number): string => {
       if (isSymbolic(p.name) && p.args.length === 2 && l !== undefined && r !== undefined) {
         return parensIf(ctx > 0, `${prettyPatPrec(l, 1)} ${p.name} ${prettyPatPrec(r, 0)}`);
       }
-      if (p.args.length === 0) return varName(p.name);
+      if (p.args.length === 0) {
+        return varName(p.name);
+      }
       return parensIf(
         ctx > 1,
         [varName(p.name), ...p.args.map((a) => prettyPatPrec(a, 2))].join(" "),
@@ -236,7 +238,9 @@ export const prettyTopDecl = (d: TopDecl): string =>
 /** Renders a module on one line with explicit braces. */
 export const prettyModule = (m: Module): string => {
   const body = braces(m.decls.map(prettyTopDecl));
-  if (m.name === undefined) return body;
+  if (m.name === undefined) {
+    return body;
+  }
   const exports = m.exports === undefined ? "" : ` (${m.exports.map(varName).join(", ")})`;
   return `module ${m.name}${exports} where ${body}`;
 };

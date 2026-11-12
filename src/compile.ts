@@ -5,21 +5,12 @@ import { Result } from "effect";
 import { readFileSync } from "node:fs";
 import { CodegenError, type Warning, generate } from "./codegen/ts.ts";
 import { lowerModule } from "./core/lower.ts";
-import { LexError, ParseError, ScopeError, TypeCheckError } from "./errors.ts";
+import { GenerateError, LexError, ParseError, ScopeError, TypeCheckError } from "./errors.ts";
 import { parseModule } from "./syntax/parser.ts";
 import type { Span } from "./syntax/span.ts";
 import { inferProgram } from "./types/infer.ts";
 
 export type CompileError = LexError | ParseError | ScopeError | TypeCheckError | GenerateError;
-
-/** A program the code generator cannot translate (an unsupported feature). */
-export class GenerateError {
-  readonly _tag = "GenerateError";
-  constructor(
-    readonly message: string,
-    readonly span: Span,
-  ) {}
-}
 
 export interface CompileOptions {
   /** Source file name, used in runtime error messages. */
@@ -43,11 +34,17 @@ export const compile = (
   options: CompileOptions,
 ): Result.Result<Compiled, CompileError> => {
   const parsed = parseModule(source);
-  if (Result.isFailure(parsed)) return Result.fail(parsed.failure);
+  if (Result.isFailure(parsed)) {
+    return Result.fail(parsed.failure);
+  }
   const lowered = lowerModule(parsed.success);
-  if (Result.isFailure(lowered)) return Result.fail(lowered.failure);
+  if (Result.isFailure(lowered)) {
+    return Result.fail(lowered.failure);
+  }
   const typed = inferProgram(lowered.success);
-  if (Result.isFailure(typed)) return Result.fail(typed.failure);
+  if (Result.isFailure(typed)) {
+    return Result.fail(typed.failure);
+  }
   try {
     const { code, warnings } = generate(typed.success, {
       fileName: options.fileName,
@@ -55,7 +52,9 @@ export const compile = (
     });
     return Result.succeed({ code, warnings });
   } catch (e) {
-    if (e instanceof CodegenError) return Result.fail(new GenerateError(e.message, e.span));
+    if (e instanceof CodegenError) {
+      return Result.fail(new GenerateError({ message: e.message, span: e.span }));
+    }
     throw e;
   }
 };
@@ -85,7 +84,9 @@ export const formatDiagnostic = (
   fileName: string,
 ): string => {
   const { start, end } = e.span;
-  if (start.line === 0) return `${fileName}: ${severity}: ${e.message}`;
+  if (start.line === 0) {
+    return `${fileName}: ${severity}: ${e.message}`;
+  }
   const line = source.split(/\r\n|\r|\n/)[start.line - 1] ?? "";
   const width =
     end.line === start.line
@@ -100,4 +101,4 @@ export const formatDiagnostic = (
   ].join("\n");
 };
 
-export { LexError, ParseError, ScopeError, TypeCheckError };
+export { GenerateError, LexError, ParseError, ScopeError, TypeCheckError };

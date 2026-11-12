@@ -20,6 +20,10 @@ export default defineConfig({
     exports: true,
   },
   lint: {
+    rules: {
+      // Always brace the bodies of `if`, `else`, `for` and `while`, even one-line returns.
+      curly: ["error", "all"],
+    },
     options: {
       typeAware: true,
       typeCheck: true,

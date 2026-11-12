@@ -67,11 +67,15 @@ const patVars = (
       patVars(p.pat, acc);
       break;
     case "PCon":
-      for (const a of p.args) patVars(a, acc);
+      for (const a of p.args) {
+        patVars(a, acc);
+      }
       break;
     case "PTuple":
     case "PList":
-      for (const a of p.elems) patVars(a, acc);
+      for (const a of p.elems) {
+        patVars(a, acc);
+      }
       break;
     case "PWildcard":
     case "PLit":
@@ -106,7 +110,9 @@ class Lowerer {
 
   private addData(info: DataInfo): void {
     this.types.set(info.name, info.params.length);
-    for (const c of info.constructors) this.cons.set(c.name, c);
+    for (const c of info.constructors) {
+      this.cons.set(c.name, c);
+    }
     this.data.push(info);
   }
 
@@ -117,10 +123,14 @@ class Lowerer {
     const valueDecls = m.decls.filter((d): d is S.Decl => d._tag !== "DataDecl");
 
     for (const d of dataDecls) {
-      if (this.types.has(d.name)) fail(`multiple declarations of the type '${d.name}'`, d.span);
+      if (this.types.has(d.name)) {
+        fail(`multiple declarations of the type '${d.name}'`, d.span);
+      }
       this.types.set(d.name, d.params.length);
     }
-    for (const d of dataDecls) this.lowerData(d);
+    for (const d of dataDecls) {
+      this.lowerData(d);
+    }
 
     const { binds } = this.lowerBindings(valueDecls, Scope.empty, true);
     return { moduleName: m.name ?? "Main", data: this.data, groups: dependencyGroups(binds) };
@@ -129,8 +139,9 @@ class Lowerer {
   private lowerData(d: S.DataDecl): void {
     const seen = new Set<string>();
     for (const p of d.params) {
-      if (seen.has(p))
+      if (seen.has(p)) {
         fail(`the type variable '${p}' appears twice in the declaration of '${d.name}'`, d.span);
+      }
       seen.add(p);
     }
     const constructorsSeen = new Set<string>();
@@ -139,7 +150,9 @@ class Lowerer {
         fail(`multiple declarations of the constructor '${c.name}'`, c.span);
       }
       constructorsSeen.add(c.name);
-      for (const f of c.fields) this.checkType(f, seen);
+      for (const f of c.fields) {
+        this.checkType(f, seen);
+      }
       return { name: c.name, typeName: d.name, fields: c.fields, tag };
     });
     this.addData({ name: d.name, params: d.params, constructors, builtin: false, span: d.span });
@@ -154,8 +167,9 @@ class Lowerer {
   private checkType(t: S.Type, tyvars?: ReadonlySet<string>): void {
     switch (t._tag) {
       case "TVar":
-        if (tyvars !== undefined && !tyvars.has(t.name))
+        if (tyvars !== undefined && !tyvars.has(t.name)) {
           fail(`type variable not in scope: '${t.name}'`, t.span);
+        }
         return;
       case "TCon":
         if (!this.types.has(t.name) && tupleArity(t.name) === undefined) {
@@ -174,7 +188,9 @@ class Lowerer {
         this.checkType(t.elem, tyvars);
         return;
       case "TTuple":
-        for (const e of t.elems) this.checkType(e, tyvars);
+        for (const e of t.elems) {
+          this.checkType(e, tyvars);
+        }
     }
   }
 
@@ -206,8 +222,9 @@ class Lowerer {
           span,
         );
       }
-      if (topLevel && primNames.has(name))
+      if (topLevel && primNames.has(name)) {
         fail(`'${name}' is already defined in the Prelude`, span);
+      }
       definedAt.set(name, span);
       names.set(name, this.fresh(name));
     };
@@ -230,8 +247,9 @@ class Lowerer {
           const vars = patVars(d.pat);
           const inPattern = new Set<string>();
           for (const v of vars) {
-            if (inPattern.has(v.name))
+            if (inPattern.has(v.name)) {
               fail(`conflicting definitions for '${v.name}' in a pattern`, v.span);
+            }
             inPattern.add(v.name);
             define(v.name, v.span);
           }
@@ -240,7 +258,9 @@ class Lowerer {
         }
         case "TypeSig":
           for (const n of d.names) {
-            if (sigs.has(n)) fail(`duplicate type signatures for '${n}'`, d.span);
+            if (sigs.has(n)) {
+              fail(`duplicate type signatures for '${n}'`, d.span);
+            }
             this.checkType(d.type);
             sigs.set(n, { type: d.type, span: d.span });
           }
@@ -248,8 +268,9 @@ class Lowerer {
       }
     }
     for (const [n, sig] of sigs) {
-      if (!names.has(n))
+      if (!names.has(n)) {
         fail(`the type signature for '${n}' lacks an accompanying binding`, sig.span);
+      }
     }
 
     // 2. Lower right-hand sides in the extended (recursive) scope.
@@ -327,13 +348,18 @@ class Lowerer {
     span: Span,
   ): CExpr {
     const [first, ...rest] = clauses;
-    if (first === undefined) return fail("internal: no clauses", span);
+    if (first === undefined) {
+      return fail("internal: no clauses", span);
+    }
     const arity = first.pats.length;
     for (const c of rest) {
-      if (c.pats.length !== arity)
+      if (c.pats.length !== arity) {
         fail(`the equations for ${context} have different numbers of arguments`, c.span);
+      }
     }
-    if (arity === 0) return this.guardedToExpr(this.lowerRhs(first.rhs, scope), context, span);
+    if (arity === 0) {
+      return this.guardedToExpr(this.lowerRhs(first.rhs, scope), context, span);
+    }
 
     // Simple case: one clause, only variable/wildcard patterns, no guards: plain lambdas.
     if (
@@ -346,7 +372,9 @@ class Lowerer {
         return pat._tag === "PVar" ? pat.name : this.fresh("_");
       });
       const body = this.lowerRhs(first.rhs, scope.extend(locals));
-      if (body._tag === "Body") return this.lams(params, body.expr, span);
+      if (body._tag === "Body") {
+        return this.lams(params, body.expr, span);
+      }
       const match: CExpr = {
         _tag: "Match",
         scrutinees: [],
@@ -431,7 +459,9 @@ class Lowerer {
   /** Lowers a pattern, adding its variables to `locals` (which must not contain them yet). */
   private lowerPat(p: S.Pat, locals: Map<string, Name>): CPat {
     const bind = (text: string, span: Span): Name => {
-      if (locals.has(text)) fail(`conflicting definitions for '${text}' in a pattern`, span);
+      if (locals.has(text)) {
+        fail(`conflicting definitions for '${text}' in a pattern`, span);
+      }
       const name = this.fresh(text);
       locals.set(text, name);
       return name;
@@ -483,12 +513,20 @@ class Lowerer {
   }
 
   private conArity(name: string, span: Span): number {
-    if (name === "()" || name === "[]") return 0;
-    if (name === ":") return 2;
+    if (name === "()" || name === "[]") {
+      return 0;
+    }
+    if (name === ":") {
+      return 2;
+    }
     const tuple = tupleArity(name);
-    if (tuple !== undefined) return tuple;
+    if (tuple !== undefined) {
+      return tuple;
+    }
     const info = this.cons.get(name);
-    if (info === undefined) return fail(`data constructor not in scope: '${name}'`, span);
+    if (info === undefined) {
+      return fail(`data constructor not in scope: '${name}'`, span);
+    }
     return info.fields.length;
   }
 
@@ -497,9 +535,15 @@ class Lowerer {
   /** A variable or operator occurrence. */
   private resolveVar(text: string, scope: Scope, span: Span): CExpr {
     const local = scope.lookup(text);
-    if (local !== undefined) return { _tag: "Var", name: local, span };
-    if (text === "otherwise") return { _tag: "Con", name: "True", span };
-    if (primNames.has(text)) return { _tag: "Prim", name: text, span };
+    if (local !== undefined) {
+      return { _tag: "Var", name: local, span };
+    }
+    if (text === "otherwise") {
+      return { _tag: "Con", name: "True", span };
+    }
+    if (primNames.has(text)) {
+      return { _tag: "Prim", name: text, span };
+    }
     return fail(`variable not in scope: '${text}'`, span);
   }
 
@@ -563,7 +607,9 @@ class Lowerer {
             span: e.span,
           };
         }
-        if (this.isPrim(op, "$")) return { _tag: "App", fn: left, arg: right, span: e.span };
+        if (this.isPrim(op, "$")) {
+          return { _tag: "App", fn: left, arg: right, span: e.span };
+        }
         return this.app(op, left, right);
       }
       case "Neg": {
@@ -674,10 +720,13 @@ class Lowerer {
    */
   private lowerStmts(stmts: ReadonlyArray<S.Stmt>, scope: Scope, span: Span): CExpr {
     const [st, ...rest] = stmts;
-    if (st === undefined) return fail("internal: empty do block", span);
+    if (st === undefined) {
+      return fail("internal: empty do block", span);
+    }
     if (rest.length === 0) {
-      if (st._tag !== "ExprStmt")
+      if (st._tag !== "ExprStmt") {
         return fail("the last statement in a 'do' block must be an expression", st.span);
+      }
       return this.lowerExpr(st.expr, scope);
     }
     const prim = (name: string): CExpr => ({ _tag: "Prim", name, span: st.span });
@@ -722,7 +771,9 @@ export const lowerModule = (m: S.Module): Result.Result<Program, ScopeError> => 
   try {
     return Result.succeed(new Lowerer().lowerModule(m));
   } catch (e) {
-    if (e instanceof ScopeError) return Result.fail(e);
+    if (e instanceof ScopeError) {
+      return Result.fail(e);
+    }
     throw e;
   }
 };

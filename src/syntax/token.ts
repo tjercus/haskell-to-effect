@@ -60,8 +60,12 @@ export const describeToken = (t: Token): string => {
       return `literal ${t.text}`;
     case "Special":
       if (t.virtual) {
-        if (t.text === "{") return "the start of an indented block";
-        if (t.text === ";") return "a new line at the same indentation";
+        if (t.text === "{") {
+          return "the start of an indented block";
+        }
+        if (t.text === ";") {
+          return "a new line at the same indentation";
+        }
         return "the end of an indented block";
       }
       return `'${t.text}'`;

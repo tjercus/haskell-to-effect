@@ -8,20 +8,26 @@ const lines = (...ls: Array<string>): string => ls.join("\n");
 
 const lower = (src: string) => {
   const parsed = parseModule(src);
-  if (Result.isFailure(parsed)) throw new Error(`parse failed: ${parsed.failure.message}`);
+  if (Result.isFailure(parsed)) {
+    throw new Error(`parse failed: ${parsed.failure.message}`);
+  }
   return lowerModule(parsed.success);
 };
 
 /** Core of a module, rendered for snapshots. */
 const core = (...ls: Array<string>): string => {
   const r = lower(lines(...ls));
-  if (Result.isFailure(r)) throw new Error(`lowering failed: ${r.failure.message}`);
+  if (Result.isFailure(r)) {
+    throw new Error(`lowering failed: ${r.failure.message}`);
+  }
   return prettyProgram(r.success);
 };
 
 const scopeErr = (...ls: Array<string>): string => {
   const r = lower(lines(...ls));
-  if (Result.isSuccess(r)) throw new Error("expected a scope error");
+  if (Result.isSuccess(r)) {
+    throw new Error("expected a scope error");
+  }
   return r.failure.message;
 };
 

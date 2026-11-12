@@ -34,7 +34,9 @@ beforeAll(() => {
     const fileName = `${name}.hs`;
     const source = readFileSync(join(programsDir, fileName), "utf8");
     const result = compile(source, { fileName });
-    if (Result.isFailure(result)) throw new Error(formatError(result.failure, source, fileName));
+    if (Result.isFailure(result)) {
+      throw new Error(formatError(result.failure, source, fileName));
+    }
     const dir = join(outRoot, name);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, `${name}.ts`), result.success.code);

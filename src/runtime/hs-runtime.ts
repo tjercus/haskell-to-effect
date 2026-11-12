@@ -13,7 +13,7 @@
  * This file is copied next to every compiled module, so it only uses erasable TypeScript
  * syntax and depends on nothing but `effect`.
  */
-import { Cause, Effect, Exit, Layer, Terminal } from "effect";
+import { Cause, Effect, Exit, Layer, Predicate, Terminal } from "effect";
 import { createInterface } from "node:readline";
 
 // ---- representation -----------------------------------------------------------------
@@ -43,13 +43,17 @@ export const Right = <A, B>(a0: B): Either<A, B> => ({ _tag: "Right", a0 });
 
 export const fromArray = <A>(xs: ReadonlyArray<A>): List<A> => {
   let list: List<A> = Nil;
-  for (let i = xs.length - 1; i >= 0; i--) list = Cons(xs[i] as A, list);
+  for (let i = xs.length - 1; i >= 0; i--) {
+    list = Cons(xs[i] as A, list);
+  }
   return list;
 };
 
 export const toArray = <A>(list: List<A>): Array<A> => {
   const out: Array<A> = [];
-  for (let l = list; l._tag === "Cons"; l = l.tail) out.push(l.head);
+  for (let l = list; l._tag === "Cons"; l = l.tail) {
+    out.push(l.head);
+  }
   return out;
 };
 
@@ -96,7 +100,9 @@ export const trampoline = <A>(start: Deep<A>): A => {
   let value: unknown = undefined;
   for (;;) {
     const top = calls[calls.length - 1];
-    if (top === undefined) return value as A;
+    if (top === undefined) {
+      return value as A;
+    }
     const r = top.next(value);
     if (r.done === true) {
       calls.pop();
@@ -128,28 +134,35 @@ export const registerConstructors = (names: ReadonlyArray<string>): void => {
 
 type Tagged = { readonly _tag: string } & Record<string, unknown>;
 
-const isTagged = (x: unknown): x is Tagged => typeof x === "object" && x !== null && "_tag" in x;
+const isTagged = (x: unknown): x is Tagged =>
+  Predicate.hasProperty(x, "_tag") && Predicate.isString(x._tag);
 
 const fields = (x: Tagged): Array<unknown> => {
   const out: Array<unknown> = [];
-  for (let i = 0; `a${i}` in x; i++) out.push(x[`a${i}`]);
+  for (let i = 0; `a${i}` in x; i++) {
+    out.push(x[`a${i}`]);
+  }
   return out;
 };
 
 /** Structural comparison: negative, zero or positive. */
 export const compareAny = (a: unknown, b: unknown): number => {
-  if (typeof a === "function" || typeof b === "function") {
+  if (Predicate.isFunction(a) || Predicate.isFunction(b)) {
     throw new HaskellError("cannot compare functions");
   }
-  if (typeof a === "number" || typeof a === "string" || typeof a === "boolean") {
+  if (Predicate.isNumber(a) || Predicate.isString(a) || Predicate.isBoolean(a)) {
     return a < (b as typeof a) ? -1 : a > (b as typeof a) ? 1 : 0;
   }
-  if (a === undefined) return 0;
+  if (a === undefined) {
+    return 0;
+  }
   if (Array.isArray(a)) {
     const bs = b as ReadonlyArray<unknown>;
     for (let i = 0; i < a.length; i++) {
       const c = compareAny(a[i], bs[i]);
-      if (c !== 0) return c;
+      if (c !== 0) {
+        return c;
+      }
     }
     return 0;
   }
@@ -159,17 +172,22 @@ export const compareAny = (a: unknown, b: unknown): number => {
     let y: Tagged = b;
     while (x._tag === "Cons" && y._tag === "Cons") {
       const c = compareAny(x["head"], y["head"]);
-      if (c !== 0) return c;
+      if (c !== 0) {
+        return c;
+      }
       x = x["tail"] as Tagged;
       y = y["tail"] as Tagged;
     }
-    if (x._tag !== y._tag)
+    if (x._tag !== y._tag) {
       return (constructorIndex.get(x._tag) ?? 0) - (constructorIndex.get(y._tag) ?? 0);
+    }
     const fx = fields(x);
     const fy = fields(y);
     for (let i = 0; i < fx.length; i++) {
       const c = compareAny(fx[i], fy[i]);
-      if (c !== 0) return c;
+      if (c !== 0) {
+        return c;
+      }
     }
     return 0;
   }
@@ -228,13 +246,17 @@ export const mul =
 
 /** `div`: integer division rounding towards negative infinity. */
 export const divInt = (a: number, b: number): number => {
-  if (b === 0) throw new HaskellError("divide by zero");
+  if (b === 0) {
+    throw new HaskellError("divide by zero");
+  }
   return Math.floor(a / b);
 };
 
 /** `mod`: the result has the sign of the divisor. */
 export const modInt = (a: number, b: number): number => {
-  if (b === 0) throw new HaskellError("divide by zero");
+  if (b === 0) {
+    throw new HaskellError("divide by zero");
+  }
   return ((a % b) + b) % b;
 };
 
@@ -277,7 +299,9 @@ export const foldr =
   (xs: List<A>): B => {
     const arr = toArray(xs);
     let acc = z;
-    for (let i = arr.length - 1; i >= 0; i--) acc = f(arr[i] as A)(acc);
+    for (let i = arr.length - 1; i >= 0; i--) {
+      acc = f(arr[i] as A)(acc);
+    }
     return acc;
   };
 
@@ -286,23 +310,31 @@ export const foldl =
   (z: B) =>
   (xs: List<A>): B => {
     let acc = z;
-    for (let l = xs; l._tag === "Cons"; l = l.tail) acc = f(acc)(l.head);
+    for (let l = xs; l._tag === "Cons"; l = l.tail) {
+      acc = f(acc)(l.head);
+    }
     return acc;
   };
 
 export const length = <A>(xs: List<A>): number => {
   let n = 0;
-  for (let l = xs; l._tag === "Cons"; l = l.tail) n++;
+  for (let l = xs; l._tag === "Cons"; l = l.tail) {
+    n++;
+  }
   return n;
 };
 
 export const head = <A>(xs: List<A>): A => {
-  if (xs._tag === "Nil") throw new HaskellError("Prelude.head: empty list");
+  if (xs._tag === "Nil") {
+    throw new HaskellError("Prelude.head: empty list");
+  }
   return xs.head;
 };
 
 export const tail = <A>(xs: List<A>): List<A> => {
-  if (xs._tag === "Nil") throw new HaskellError("Prelude.tail: empty list");
+  if (xs._tag === "Nil") {
+    throw new HaskellError("Prelude.tail: empty list");
+  }
   return xs.tail;
 };
 
@@ -310,15 +342,21 @@ export const null_ = <A>(xs: List<A>): boolean => xs._tag === "Nil";
 
 export const reverse = <A>(xs: List<A>): List<A> => {
   let out: List<A> = Nil;
-  for (let l = xs; l._tag === "Cons"; l = l.tail) out = Cons(l.head, out);
+  for (let l = xs; l._tag === "Cons"; l = l.tail) {
+    out = Cons(l.head, out);
+  }
   return out;
 };
 
 export const appendList = <A>(xs: List<A>, ys: List<A>): List<A> => {
-  if (ys._tag === "Nil") return xs;
+  if (ys._tag === "Nil") {
+    return xs;
+  }
   const arr = toArray(xs);
   let out: List<A> = ys;
-  for (let i = arr.length - 1; i >= 0; i--) out = Cons(arr[i] as A, out);
+  for (let i = arr.length - 1; i >= 0; i--) {
+    out = Cons(arr[i] as A, out);
+  }
   return out;
 };
 
@@ -341,7 +379,9 @@ export const take =
   <A>(n: number) =>
   (xs: List<A>): List<A> => {
     const out: Array<A> = [];
-    for (let l = xs; l._tag === "Cons" && out.length < n; l = l.tail) out.push(l.head);
+    for (let l = xs; l._tag === "Cons" && out.length < n; l = l.tail) {
+      out.push(l.head);
+    }
     return fromArray(out);
   };
 
@@ -349,7 +389,9 @@ export const drop =
   <A>(n: number) =>
   (xs: List<A>): List<A> => {
     let l = xs;
-    for (let i = 0; i < n && l._tag === "Cons"; i++) l = l.tail;
+    for (let i = 0; i < n && l._tag === "Cons"; i++) {
+      l = l.tail;
+    }
     return l;
   };
 
@@ -375,15 +417,23 @@ export const zip =
 export const elem =
   <A>(x: A) =>
   (xs: List<A>): boolean => {
-    for (let l = xs; l._tag === "Cons"; l = l.tail) if (equals(x, l.head)) return true;
+    for (let l = xs; l._tag === "Cons"; l = l.tail) {
+      if (equals(x, l.head)) {
+        return true;
+      }
+    }
     return false;
   };
 
 export const lines = (s: List<Char>): List<List<Char>> => {
   const js = toJs(s);
-  if (js === "") return Nil;
+  if (js === "") {
+    return Nil;
+  }
   const parts = js.split("\n");
-  if (js.endsWith("\n")) parts.pop();
+  if (js.endsWith("\n")) {
+    parts.pop();
+  }
   return fromArray(parts.map(str));
 };
 
@@ -471,10 +521,18 @@ const asciiNames = [
 /** Escapes one character as GHC's `showLitChar` does; `next` decides whether `\&` is needed. */
 const escapeChar = (c: string, next: string | undefined, quote: '"' | "'"): string => {
   const cp = c.codePointAt(0) ?? 0;
-  if (c === "\\") return "\\\\";
-  if (c === quote) return `\\${quote}`;
-  if (cp >= 0x20 && cp < 0x7f) return c;
-  if (cp === 0x7f) return "\\DEL";
+  if (c === "\\") {
+    return "\\\\";
+  }
+  if (c === quote) {
+    return `\\${quote}`;
+  }
+  if (cp >= 0x20 && cp < 0x7f) {
+    return c;
+  }
+  if (cp === 0x7f) {
+    return "\\DEL";
+  }
   if (cp < 0x20) {
     const name = asciiNames[cp] ?? "";
     // "\SO" followed by "H" would read as "\SOH".
@@ -529,16 +587,28 @@ export const showEither =
  * is unknown. Ambiguous only for the empty string, which is shown as `[]`.
  */
 export const showAny: Shower<unknown> = (p, x) => {
-  if (typeof x === "number") return showInt(p, x);
-  if (typeof x === "boolean") return showBool(p, x);
-  if (typeof x === "string") return showChar(p, x);
-  if (typeof x === "function") return "<function>";
-  if (x === undefined) return "()";
-  if (Array.isArray(x)) return `(${x.map((e) => showAny(0, e)).join(",")})`;
+  if (Predicate.isNumber(x)) {
+    return showInt(p, x);
+  }
+  if (Predicate.isBoolean(x)) {
+    return showBool(p, x);
+  }
+  if (Predicate.isString(x)) {
+    return showChar(p, x);
+  }
+  if (Predicate.isFunction(x)) {
+    return "<function>";
+  }
+  if (x === undefined) {
+    return "()";
+  }
+  if (Array.isArray(x)) {
+    return `(${x.map((e) => showAny(0, e)).join(",")})`;
+  }
   if (isTagged(x)) {
     if (x._tag === "Nil" || x._tag === "Cons") {
       const items = toArray(x as List<unknown>);
-      if (items.length > 0 && items.every((i) => typeof i === "string")) {
+      if (items.length > 0 && items.every(Predicate.isString)) {
         return showString(0, x as List<Char>);
       }
       return `[${items.map((i) => showAny(0, i)).join(",")}]`;
@@ -560,12 +630,13 @@ export const showWith =
 
 // ---- IO ---------------------------------------------------------------------------------
 
-const display = (text: string): IO<undefined> =>
-  Effect.gen(function* () {
-    const terminal = yield* Terminal.Terminal;
-    yield* Effect.orDie(terminal.display(text));
-    return undefined;
-  });
+const display = Effect.fnUntraced(function* (
+  text: string,
+): Effect.fn.Return<undefined, never, Terminal.Terminal> {
+  const terminal = yield* Terminal.Terminal;
+  yield* Effect.orDie(terminal.display(text));
+  return undefined;
+});
 
 export const putStr = (s: List<Char>): IO<undefined> => Effect.suspend(() => display(toJs(s)));
 export const putStrLn = (s: List<Char>): IO<undefined> =>
@@ -579,8 +650,9 @@ export const print = <A>(x: A): IO<undefined> => printWith<A>(showAny)(x);
 /** Reads a line from the terminal; at end of input this is an error, as in GHC. */
 export const getLine: IO<List<Char>> = Effect.gen(function* () {
   const terminal = yield* Terminal.Terminal;
-  const line = yield* Effect.orDie(
-    Effect.mapError(terminal.readLine, () => new HaskellError("<stdin>: hGetLine: end of file")),
+  const line = yield* terminal.readLine.pipe(
+    Effect.mapError(() => new HaskellError("<stdin>: hGetLine: end of file")),
+    Effect.orDie,
   );
   return str(line);
 });
@@ -622,39 +694,32 @@ const unsupported = Effect.die(new HaskellError("unsupported terminal operation"
  */
 export const nodeTerminal: Layer.Layer<Terminal.Terminal> = Layer.effect(
   Terminal.Terminal,
-  Effect.map(
-    Effect.acquireRelease(
-      Effect.sync(() => {
-        let rl: ReturnType<typeof createInterface> | undefined;
-        let lines: AsyncIterator<string> | undefined;
-        const next = (): Promise<IteratorResult<string>> => {
-          if (lines === undefined) {
-            rl = createInterface({ input: process.stdin, terminal: false });
-            lines = rl[Symbol.asyncIterator]();
-          }
-          return lines.next();
-        };
-        const terminal = Terminal.make({
-          columns: Effect.sync(() => process.stdout.columns ?? 80),
-          rows: Effect.sync(() => process.stdout.rows ?? 24),
-          size: unsupported,
-          readInput: unsupported,
-          readLine: Effect.flatMap(
-            Effect.promise(() => next()),
-            (r) =>
-              r.done === true ? Effect.fail(new Terminal.QuitError()) : Effect.succeed(r.value),
-          ),
-          display: (text) =>
-            Effect.sync(() => {
-              process.stdout.write(text);
-            }),
-        });
-        return { terminal, close: () => rl?.close() };
-      }),
-      ({ close }) => Effect.sync(close),
-    ),
-    ({ terminal }) => terminal,
-  ),
+  Effect.gen(function* () {
+    let rl: ReturnType<typeof createInterface> | undefined;
+    let lines: AsyncIterator<string> | undefined;
+    yield* Effect.addFinalizer(() => Effect.sync(() => rl?.close()));
+    const next = (): Promise<IteratorResult<string>> => {
+      if (lines === undefined) {
+        rl = createInterface({ input: process.stdin, terminal: false });
+        lines = rl[Symbol.asyncIterator]();
+      }
+      return lines.next();
+    };
+    return Terminal.make({
+      columns: Effect.sync(() => process.stdout.columns ?? 80),
+      rows: Effect.sync(() => process.stdout.rows ?? 24),
+      size: unsupported,
+      readInput: unsupported,
+      readLine: Effect.flatMap(
+        Effect.promise(() => next()),
+        (r) => (r.done === true ? Effect.fail(new Terminal.QuitError()) : Effect.succeed(r.value)),
+      ),
+      display: (text) =>
+        Effect.sync(() => {
+          process.stdout.write(text);
+        }),
+    });
+  }),
 );
 
 /** A `Terminal` for tests: reads lines from `input` and appends displayed text to `output`. */
@@ -689,7 +754,9 @@ export const runMain = async (
   terminal: Layer.Layer<Terminal.Terminal> = nodeTerminal,
 ): Promise<void> => {
   const exit = await Effect.runPromiseExit(Effect.provide(main, terminal));
-  if (Exit.isSuccess(exit)) return;
+  if (Exit.isSuccess(exit)) {
+    return;
+  }
   const err = Cause.squash(exit.cause);
   process.stderr.write(
     err instanceof HaskellError
@@ -708,7 +775,9 @@ export const runModule = async (
   try {
     mod = await load();
   } catch (e) {
-    if (!(e instanceof HaskellError)) throw e;
+    if (!(e instanceof HaskellError)) {
+      throw e;
+    }
     process.stderr.write(`${prog}: ${e.message}\n`);
     process.exitCode = 1;
     return;

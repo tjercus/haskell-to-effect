@@ -49,14 +49,18 @@ export const monoScheme = (type: Type): Scheme => ({ vars: [], type });
 
 /** Follows solved metas at the top of a type. */
 export const prune = (t: Type): Type => {
-  while (t._tag === "TMeta" && t.ref.link !== undefined) t = t.ref.link;
+  while (t._tag === "TMeta" && t.ref.link !== undefined) {
+    t = t.ref.link;
+  }
   return t;
 };
 
 /** Replaces all solved metas in a type by their solutions. */
 export const zonk = (t: Type): Type => {
   const p = prune(t);
-  if (p._tag !== "TCon") return p;
+  if (p._tag !== "TCon") {
+    return p;
+  }
   return p.args.length === 0 ? p : { ...p, args: p.args.map(zonk) };
 };
 
@@ -102,7 +106,9 @@ export class TypePrinter {
           renamed.size < 26 ? String.fromCharCode(97 + renamed.size) : `t${renamed.size - 25}`;
         renamed.set(p.id, { _tag: "TVar", name, id: p.id, level: p.level });
       } else if (p._tag === "TCon") {
-        for (const a of p.args) visit(a);
+        for (const a of p.args) {
+          visit(a);
+        }
       }
     };
     visit(s.type);
@@ -130,11 +136,17 @@ export class TypePrinter {
         }
         if (t.name === "[]" && a) {
           const elem = prune(a);
-          if (elem._tag === "TCon" && elem.name === "Char") return "String";
+          if (elem._tag === "TCon" && elem.name === "Char") {
+            return "String";
+          }
           return `[${this.go(a, 0)}]`;
         }
-        if (/^\(,+\)$/.test(t.name)) return `(${t.args.map((x) => this.go(x, 0)).join(", ")})`;
-        if (t.args.length === 0) return t.name;
+        if (/^\(,+\)$/.test(t.name)) {
+          return `(${t.args.map((x) => this.go(x, 0)).join(", ")})`;
+        }
+        if (t.args.length === 0) {
+          return t.name;
+        }
         const s = [t.name, ...t.args.map((x) => this.go(x, 2))].join(" ");
         return ctx > 1 ? `(${s})` : s;
       }

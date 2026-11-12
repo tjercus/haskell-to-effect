@@ -14,7 +14,9 @@ export const freeVarIds = (e: CExpr, acc: Set<number> = new Set()): Set<number> 
         }
         return;
       case "LetBody":
-        for (const bind of bindsOf(b.group)) freeVarIds(bind.expr, acc);
+        for (const bind of bindsOf(b.group)) {
+          freeVarIds(bind.expr, acc);
+        }
         goBody(b.body);
     }
   };
@@ -34,7 +36,9 @@ export const freeVarIds = (e: CExpr, acc: Set<number> = new Set()): Set<number> 
       freeVarIds(e.body, acc);
       break;
     case "Let":
-      for (const bind of bindsOf(e.group)) freeVarIds(bind.expr, acc);
+      for (const bind of bindsOf(e.group)) {
+        freeVarIds(bind.expr, acc);
+      }
       freeVarIds(e.body, acc);
       break;
     case "If":
@@ -43,8 +47,12 @@ export const freeVarIds = (e: CExpr, acc: Set<number> = new Set()): Set<number> 
       freeVarIds(e.elseBranch, acc);
       break;
     case "Match":
-      for (const s of e.scrutinees) acc.add(s.id);
-      for (const c of e.clauses) goBody(c.body);
+      for (const s of e.scrutinees) {
+        acc.add(s.id);
+      }
+      for (const c of e.clauses) {
+        goBody(c.body);
+      }
       break;
     case "Typed":
       freeVarIds(e.expr, acc);
@@ -70,8 +78,12 @@ export const dependencyGroups = (
   const deps = binds.map((b) =>
     [...freeVarIds(b.expr)].flatMap((id) => {
       const j = index.get(id);
-      if (j === undefined) return [];
-      if (options.ignoreSignatures && binds[j]?.sig !== undefined) return [];
+      if (j === undefined) {
+        return [];
+      }
+      if (options.ignoreSignatures && binds[j]?.sig !== undefined) {
+        return [];
+      }
       return [j];
     }),
   );
@@ -95,14 +107,20 @@ export const dependencyGroups = (
         low[v] = Math.min(low[v] ?? 0, order[w] ?? 0);
       }
     }
-    if (low[v] !== order[v]) return;
+    if (low[v] !== order[v]) {
+      return;
+    }
     const members: Array<number> = [];
     for (;;) {
       const w = stack.pop();
-      if (w === undefined) break;
+      if (w === undefined) {
+        break;
+      }
       onStack[w] = false;
       members.push(w);
-      if (w === v) break;
+      if (w === v) {
+        break;
+      }
     }
     members.sort((a, b) => a - b);
     const component = members.flatMap((i) => {
@@ -118,6 +136,10 @@ export const dependencyGroups = (
     );
   };
 
-  for (let v = 0; v < binds.length; v++) if (order[v] === -1) visit(v);
+  for (let v = 0; v < binds.length; v++) {
+    if (order[v] === -1) {
+      visit(v);
+    }
+  }
   return groups;
 };

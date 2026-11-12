@@ -10,15 +10,21 @@ const lines = (...ls: Array<string>): string => ls.join("\n");
 
 const infer = (src: string, requireMain = false) => {
   const parsed = parseModule(src);
-  if (Result.isFailure(parsed)) throw new Error(`parse failed: ${parsed.failure.message}`);
+  if (Result.isFailure(parsed)) {
+    throw new Error(`parse failed: ${parsed.failure.message}`);
+  }
   const lowered = lowerModule(parsed.success);
-  if (Result.isFailure(lowered)) throw new Error(`lowering failed: ${lowered.failure.message}`);
+  if (Result.isFailure(lowered)) {
+    throw new Error(`lowering failed: ${lowered.failure.message}`);
+  }
   return inferProgram(lowered.success, { requireMain });
 };
 
 const typed = (...ls: Array<string>): TypedProgram => {
   const r = infer(lines(...ls));
-  if (Result.isFailure(r)) throw new Error(`type error: ${r.failure.message}`);
+  if (Result.isFailure(r)) {
+    throw new Error(`type error: ${r.failure.message}`);
+  }
   return r.success;
 };
 
@@ -36,7 +42,9 @@ const types = (...ls: Array<string>): Array<string> => {
 
 const typeErr = (...ls: Array<string>): string => {
   const r = infer(lines(...ls));
-  if (Result.isSuccess(r)) throw new Error("expected a type error");
+  if (Result.isSuccess(r)) {
+    throw new Error("expected a type error");
+  }
   return r.failure.message;
 };
 

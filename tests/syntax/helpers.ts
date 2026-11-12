@@ -6,20 +6,26 @@ import { prettyType } from "../../src/syntax/pretty.ts";
 /** Parses or throws, so tests can focus on the result. */
 export const parseOk = (src: string): Expr => {
   const r = parseExpr(src);
-  if (Result.isFailure(r)) throw new Error(`parse failed: ${r.failure.message}`);
+  if (Result.isFailure(r)) {
+    throw new Error(`parse failed: ${r.failure.message}`);
+  }
   return r.success;
 };
 
 /** The error message of a failing parse. */
 export const parseErr = (src: string): string => {
   const r = parseExpr(src);
-  if (Result.isSuccess(r)) throw new Error(`expected a parse error for: ${src}`);
+  if (Result.isSuccess(r)) {
+    throw new Error(`expected a parse error for: ${src}`);
+  }
   return r.failure.message;
 };
 
 /** Removes source spans, so ASTs can be compared structurally. */
 export const stripSpans = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(stripSpans);
+  if (Array.isArray(value)) {
+    return value.map(stripSpans);
+  }
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value)

@@ -15,7 +15,9 @@ class Printer {
   /** `x`, then `x_1`, `x_2`, … for distinct variables with the same source name. */
   name(n: Name): string {
     const known = this.display.get(n.id);
-    if (known !== undefined) return known;
+    if (known !== undefined) {
+      return known;
+    }
     const count = this.used.get(n.text) ?? 0;
     this.used.set(n.text, count + 1);
     const shown = count === 0 ? n.text : `${n.text}_${count}`;
@@ -27,7 +29,9 @@ class Printer {
   program(p: Program): string {
     const out: Array<string> = [];
     for (const d of p.data) {
-      if (d.builtin) continue;
+      if (d.builtin) {
+        continue;
+      }
       const cons = d.constructors.map((c) =>
         [
           c.name,
@@ -40,12 +44,16 @@ class Printer {
         `data ${[d.name, ...d.params].join(" ")}${cons.length > 0 ? ` = ${cons.join(" | ")}` : ""}`,
       );
     }
-    for (const g of p.groups) out.push(this.group(g, 0));
+    for (const g of p.groups) {
+      out.push(this.group(g, 0));
+    }
     return out.join("\n");
   }
 
   private group(g: BindGroup, indent: number): string {
-    if (g._tag === "NonRec") return this.bind(g.bind, indent);
+    if (g._tag === "NonRec") {
+      return this.bind(g.bind, indent);
+    }
     const pad = " ".repeat(indent + 2);
     return `rec {\n${g.binds.map((b) => pad + this.bind(b, indent + 2)).join("\n")}\n${" ".repeat(indent)}}`;
   }
@@ -57,7 +65,9 @@ class Printer {
   }
 
   private inlineGroup(g: BindGroup, indent: number): string {
-    if (g._tag === "NonRec") return this.bind(g.bind, indent);
+    if (g._tag === "NonRec") {
+      return this.bind(g.bind, indent);
+    }
     return `rec { ${g.binds.map((b) => this.bind(b, indent)).join("; ")} }`;
   }
 
@@ -156,14 +166,17 @@ class Printer {
       case "PAs":
         return `${this.name(p.name)}@${this.pat(p.pat, true)}`;
       case "PCon": {
-        if (tupleArity(p.name) !== undefined)
+        if (tupleArity(p.name) !== undefined) {
           return `(${p.args.map((a) => this.pat(a, false)).join(", ")})`;
+        }
         const [l, r] = p.args;
         if (p.name === ":" && l && r) {
           const s = `${this.pat(l, true)} : ${this.pat(r, false)}`;
           return atomic ? `(${s})` : s;
         }
-        if (p.args.length === 0) return p.name;
+        if (p.args.length === 0) {
+          return p.name;
+        }
         const s = [p.name, ...p.args.map((a) => this.pat(a, true))].join(" ");
         return atomic ? `(${s})` : s;
       }

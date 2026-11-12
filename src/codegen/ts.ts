@@ -166,9 +166,15 @@ class Gen {
     private readonly tp: TypedProgram,
     private readonly options: CodegenOptions,
   ) {
-    for (const d of tp.program.data) this.data.set(d.name, d);
+    for (const d of tp.program.data) {
+      this.data.set(d.name, d);
+    }
     this.matcher = new MatchCompiler(tp.program.data);
-    for (const d of tp.program.data) for (const c of d.constructors) this.usedNames.add(c.name);
+    for (const d of tp.program.data) {
+      for (const c of d.constructors) {
+        this.usedNames.add(c.name);
+      }
+    }
     const taken = tp.program.data.some(
       (d) => d.name === "Effect" || d.constructors.some((c) => c.name === "Effect"),
     );
@@ -180,13 +186,20 @@ class Gen {
 
   private name(n: Name): string {
     const known = this.names.get(n.id);
-    if (known !== undefined) return known;
+    if (known !== undefined) {
+      return known;
+    }
     let base = n.text.replace(/'/g, "$p");
-    if (!/^[\p{L}_$][\p{L}\p{N}_$]*$/u.test(base))
+    if (!/^[\p{L}_$][\p{L}\p{N}_$]*$/u.test(base)) {
       base = `_${base.replace(/[^\p{L}\p{N}_$]/gu, "_")}`;
-    if (jsReserved.has(base)) base = `${base}_`;
+    }
+    if (jsReserved.has(base)) {
+      base = `${base}_`;
+    }
     let candidate = base;
-    for (let i = 1; this.usedNames.has(candidate); i++) candidate = `${base}$${i}`;
+    for (let i = 1; this.usedNames.has(candidate); i++) {
+      candidate = `${base}$${i}`;
+    }
     this.usedNames.add(candidate);
     this.names.set(n.id, candidate);
     return candidate;
@@ -194,7 +207,9 @@ class Gen {
 
   private fresh(text: string): string {
     let candidate = text;
-    for (let i = 1; this.usedNames.has(candidate); i++) candidate = `${text}$${i}`;
+    for (let i = 1; this.usedNames.has(candidate); i++) {
+      candidate = `${text}$${i}`;
+    }
     this.usedNames.add(candidate);
     return candidate;
   }
@@ -212,9 +227,13 @@ class Gen {
         return "never";
       }
       let base = v.name.replace(/'/g, "_");
-      if (tsReservedTypes.has(base)) base = `${base}_`;
+      if (tsReservedTypes.has(base)) {
+        base = `${base}_`;
+      }
       let candidate = base;
-      for (let i = 1; inScope.has(candidate); i++) candidate = `${base}${i}`;
+      for (let i = 1; inScope.has(candidate); i++) {
+        candidate = `${base}${i}`;
+      }
       inScope.add(candidate);
       this.typeNames.set(v.id, candidate);
       return candidate;
@@ -222,7 +241,9 @@ class Gen {
     try {
       return body(params);
     } finally {
-      for (const v of vars) this.typeNames.delete(v.id);
+      for (const v of vars) {
+        this.typeNames.delete(v.id);
+      }
     }
   }
 
@@ -269,7 +290,9 @@ class Gen {
           case "Either":
             return `rt.Either<${args[0] ?? "unknown"}, ${args[1] ?? "unknown"}>`;
         }
-        if (tupleArity(p.name) !== undefined) return `readonly [${args.join(", ")}]`;
+        if (tupleArity(p.name) !== undefined) {
+          return `readonly [${args.join(", ")}]`;
+        }
         return args.length === 0 ? p.name : `${p.name}<${args.join(", ")}>`;
       }
     }
@@ -277,7 +300,9 @@ class Gen {
 
   /** Explicit type arguments for a reference to something with `scheme`, used at type `at`. */
   private typeArgs(scheme: Scheme | undefined, at: Type | undefined): string {
-    if (scheme === undefined || scheme.vars.length === 0 || at === undefined) return "";
+    if (scheme === undefined || scheme.vars.length === 0 || at === undefined) {
+      return "";
+    }
     const subst = this.instantiation(scheme, at);
     const args = scheme.vars.map((v) => {
       const t = subst.get(v.id);
@@ -289,16 +314,22 @@ class Gen {
   /** The types that `scheme`'s variables take when it is used at type `at`. */
   private instantiation(scheme: Scheme | undefined, at: Type | undefined): Map<number, Type> {
     const subst = new Map<number, Type>();
-    if (scheme === undefined || at === undefined) return subst;
+    if (scheme === undefined || at === undefined) {
+      return subst;
+    }
     const match = (s: Type, t: Type): void => {
       const ps = prune(s);
       const pt = prune(t);
       if (ps._tag === "TVar") {
-        if (!subst.has(ps.id)) subst.set(ps.id, pt);
+        if (!subst.has(ps.id)) {
+          subst.set(ps.id, pt);
+        }
       } else if (ps._tag === "TCon" && pt._tag === "TCon" && ps.name === pt.name) {
         ps.args.forEach((a, i) => {
           const b = pt.args[i];
-          if (b !== undefined) match(a, b);
+          if (b !== undefined) {
+            match(a, b);
+          }
         });
       }
     };
@@ -313,7 +344,9 @@ class Gen {
 
   private typeOf(e: CExpr): Type {
     const t = this.tp.exprTypes.get(e);
-    if (t === undefined) throw new CodegenError("internal: expression without a type", e.span);
+    if (t === undefined) {
+      throw new CodegenError("internal: expression without a type", e.span);
+    }
     return zonk(t);
   }
 
@@ -322,8 +355,12 @@ class Gen {
   /** A `Shower` for values of type `t`; `env` maps type variables to shower expressions. */
   private shower(t: Type, env: ReadonlyMap<number, string> = new Map()): string {
     const p = prune(t);
-    if (p._tag === "TMeta") return "rt.showAny";
-    if (p._tag === "TVar") return env.get(p.id) ?? "rt.showAny";
+    if (p._tag === "TMeta") {
+      return "rt.showAny";
+    }
+    if (p._tag === "TVar") {
+      return env.get(p.id) ?? "rt.showAny";
+    }
     const [a, b] = p.args;
     switch (p.name) {
       case "Int":
@@ -339,7 +376,9 @@ class Gen {
         return "rt.showFun";
       case "[]": {
         const elem = a === undefined ? undefined : prune(a);
-        if (elem?._tag === "TCon" && elem.name === "Char") return "rt.showString";
+        if (elem?._tag === "TCon" && elem.name === "Char") {
+          return "rt.showString";
+        }
         return `rt.showList(${a === undefined ? "rt.showAny" : this.shower(a, env)})`;
       }
       case "Maybe":
@@ -347,8 +386,9 @@ class Gen {
       case "Either":
         return `rt.showEither(${a === undefined ? "rt.showAny" : this.shower(a, env)}, ${b === undefined ? "rt.showAny" : this.shower(b, env)})`;
     }
-    if (tupleArity(p.name) !== undefined)
+    if (tupleArity(p.name) !== undefined) {
       return `rt.showTuple([${p.args.map((x) => this.shower(x, env)).join(", ")}])`;
+    }
     const fn = `show$${p.name}`;
     return p.args.length === 0 ? fn : `${fn}(${p.args.map((x) => this.shower(x, env)).join(", ")})`;
   }
@@ -445,20 +485,29 @@ class Gen {
 
   private group(g: BindGroup, indent: string, exported: boolean): Array<string> {
     const binds = bindsOf(g);
-    for (const b of binds) if (this.isGenericBinding(b)) this.genericBinders.add(b.name.id);
+    for (const b of binds) {
+      if (this.isGenericBinding(b)) {
+        this.genericBinders.add(b.name.id);
+      }
+    }
     if (g._tag === "Rec") {
       const deep = this.deepGroup(binds, indent, exported);
-      if (deep !== undefined) return deep;
+      if (deep !== undefined) {
+        return deep;
+      }
       const merged = this.mergedLoop(binds, indent, exported);
-      if (merged !== undefined) return merged;
+      if (merged !== undefined) {
+        return merged;
+      }
     }
     return binds.flatMap((b) => this.binding(b, indent, exported));
   }
 
   private binding(b: Bind, indent: string, exported: boolean): Array<string> {
     const scheme = this.tp.schemes.get(b.name.id);
-    if (scheme === undefined)
+    if (scheme === undefined) {
       throw new CodegenError(`internal: no scheme for '${b.name.text}'`, b.span);
+    }
     const name = this.defNames.get(b.name.id) ?? this.name(b.name);
     const prefix = `${indent}${exported ? "export " : ""}const ${name}`;
     const type = prune(scheme.type);
@@ -506,10 +555,14 @@ class Gen {
    */
   private tailLoop(b: Bind, typeArgs: string, indent: string): string | undefined {
     const fn = this.fn(b);
-    if (fn === undefined) return undefined;
+    if (fn === undefined) {
+      return undefined;
+    }
     const inner = `${indent}  `;
     const loop = this.loopStatements(fn, typeArgs, inner);
-    if (loop === undefined) return undefined;
+    if (loop === undefined) {
+      return undefined;
+    }
     const t = prune(fn.scheme.type);
     const arrows = loop.inputs.map((input, i) => {
       const head = `(${input}: ${loop.types[i] ?? "unknown"})`;
@@ -542,8 +595,9 @@ class Gen {
   /** The type `fn` returns when applied to all its parameters. */
   private resultType(fn: Fn): Type | undefined {
     let t: Type | undefined = prune(fn.scheme.type);
-    for (let i = 0; i < fn.params.length; i++)
+    for (let i = 0; i < fn.params.length; i++) {
       t = t !== undefined && isFun(t) ? prune(t.args[1]) : undefined;
+    }
     return t;
   }
 
@@ -561,8 +615,9 @@ class Gen {
       typeArgs,
       jump: (args, ind) => args.map((a, i) => `${ind}${state[i] ?? ""} = ${a};`),
     });
-    if (!this.hasTailCall(fn.body, { targets: new Map([[fn.b.name.id, target([])]]) }))
+    if (!this.hasTailCall(fn.body, { targets: new Map([[fn.b.name.id, target([])]]) })) {
       return undefined;
+    }
     const names = fn.params.map((p) => this.name(p));
     const types = this.paramTypes(fn);
     const inputs = names.map((n) => this.fresh(`${n}$in`));
@@ -602,7 +657,9 @@ class Gen {
   ): Array<string> | undefined {
     const fns = binds.flatMap((b) => this.fn(b) ?? []);
     const arities = new Map(fns.map((f) => [f.b.name.id, f.params.length]));
-    if (!fns.some((f) => this.callsDeep(f.body, arities, true))) return undefined;
+    if (!fns.some((f) => this.callsDeep(f.body, arities, true))) {
+      return undefined;
+    }
 
     const deep: Deep = {
       targets: new Map(
@@ -616,9 +673,15 @@ class Gen {
       fns.map((f) => [f.b.name.id, this.fresh(`${this.name(f.b.name)}$direct`)]),
     );
     const out: Array<string> = [];
-    for (const f of fns) out.push(...this.deepGenerator(f, deep, indent));
-    for (const f of fns) out.push(...this.deepEntry(f, deep, direct, indent, exported));
-    for (const [id, name] of direct) this.defNames.set(id, name);
+    for (const f of fns) {
+      out.push(...this.deepGenerator(f, deep, indent));
+    }
+    for (const f of fns) {
+      out.push(...this.deepEntry(f, deep, direct, indent, exported));
+    }
+    for (const [id, name] of direct) {
+      this.defNames.set(id, name);
+    }
     try {
       const merged = this.mergedLoop(binds, indent, false);
       out.push(
@@ -626,14 +689,18 @@ class Gen {
           binds.flatMap((b) => this.binding(b, indent, exported && !direct.has(b.name.id)))),
       );
     } finally {
-      for (const id of direct.keys()) this.defNames.delete(id);
+      for (const id of direct.keys()) {
+        this.defNames.delete(id);
+      }
     }
     return out;
   }
 
   /** Whether `e` calls one of `fns` (saturated) outside tail position, lambdas and IO. */
   private callsDeep(e: CExpr, fns: ReadonlyMap<number, number>, tail: boolean): boolean {
-    if (this.isIOChain(e)) return false;
+    if (this.isIOChain(e)) {
+      return false;
+    }
     const inGroup = (g: BindGroup): boolean =>
       bindsOf(g).some((b) => b.expr._tag !== "Lam" && this.callsDeep(b.expr, fns, false));
     const inBody = (g: GuardedBody): boolean => {
@@ -668,7 +735,9 @@ class Gen {
           args.push(head.arg);
           head = head.fn;
         }
-        if (!tail && head._tag === "Var" && fns.get(head.name.id) === args.length) return true;
+        if (!tail && head._tag === "Var" && fns.get(head.name.id) === args.length) {
+          return true;
+        }
         return (
           args.some((a) => this.callsDeep(a, fns, false)) ||
           (head._tag !== "Var" && this.callsDeep(head, fns, false))
@@ -694,8 +763,9 @@ class Gen {
       try {
         const inner = `${indent}  `;
         const loop = this.loopStatements(fn, tparams, inner);
-        if (loop !== undefined)
+        if (loop !== undefined) {
           return [head(loop.inputs, loop.types), ...loop.lines, `${indent}};`];
+        }
         return [
           head(
             fn.params.map((p) => this.name(p)),
@@ -733,7 +803,9 @@ class Gen {
       const gen = deep.targets.get(id)?.gen ?? "";
       return [
         `${indent}${exported ? "export " : ""}const ${this.name(fn.b.name)} = ${arrows.join(" ")} {`,
-        `${i1}if (rt.stack.depth >= rt.maxDepth) return rt.trampoline(${gen}${tparams}(${inputs.join(", ")}));`,
+        `${i1}if (rt.stack.depth >= rt.maxDepth) {`,
+        `${i1}  return rt.trampoline(${gen}${tparams}(${inputs.join(", ")}));`,
+        `${i1}}`,
         `${i1}rt.stack.depth++;`,
         `${i1}try {`,
         `${i1}  return ${direct.get(id) ?? ""}${tparams}${inputs.map((x) => `(${x})`).join("")};`,
@@ -777,8 +849,12 @@ class Gen {
       const scheme = this.tp.schemes.get(b.name.id);
       return { b, params, body, vars: scheme?.vars ?? [], scheme };
     });
-    if (members.length < 2 || members.some((m) => m.params.length === 0 || m.scheme === undefined))
+    if (
+      members.length < 2 ||
+      members.some((m) => m.params.length === 0 || m.scheme === undefined)
+    ) {
       return undefined;
+    }
     const byId = new Map(members.map((m) => [m.b.name.id, m]));
 
     // Identify type variables through the tail calls between members (union-find).
@@ -786,25 +862,35 @@ class Gen {
     const parent = new Map([...groupVars.keys()].map((id) => [id, id]));
     const find = (id: number): number => {
       let r = id;
-      while (parent.get(r) !== r) r = parent.get(r) ?? r;
+      while (parent.get(r) !== r) {
+        r = parent.get(r) ?? r;
+      }
       return r;
     };
     let crossCalls = false;
     for (const m of members) {
       for (const call of this.tailCallsTo(m.body, byId)) {
-        if (call.callee !== m.b.name.id) crossCalls = true;
+        if (call.callee !== m.b.name.id) {
+          crossCalls = true;
+        }
         const callee = byId.get(call.callee);
         const subst = this.instantiation(callee?.scheme, call.at);
         for (const v of callee?.vars ?? []) {
           const t = subst.get(v.id);
-          if (t?._tag === "TVar" && groupVars.has(t.id)) parent.set(find(v.id), find(t.id));
+          if (t?._tag === "TVar" && groupVars.has(t.id)) {
+            parent.set(find(v.id), find(t.id));
+          }
         }
       }
     }
-    if (!crossCalls) return undefined;
+    if (!crossCalls) {
+      return undefined;
+    }
     for (const m of members) {
       const classes = new Set(m.vars.map((v) => find(v.id)));
-      if (classes.size !== m.vars.length) return undefined;
+      if (classes.size !== m.vars.length) {
+        return undefined;
+      }
     }
     const reps = [...new Set([...groupVars.keys()].map(find))].flatMap((id) => {
       const v = groupVars.get(id);
@@ -816,13 +902,18 @@ class Gen {
       // Every member's variables are named after their class.
       for (const id of groupVars.keys()) {
         const name = this.typeNames.get(find(id));
-        if (name !== undefined) this.typeNames.set(id, name);
+        if (name !== undefined) {
+          this.typeNames.set(id, name);
+        }
       }
       try {
         return this.shallow(() => this.emitMergedLoop(members, params, generic, indent, exported));
       } finally {
-        for (const id of groupVars.keys())
-          if (!reps.some((r) => r.id === id)) this.typeNames.delete(id);
+        for (const id of groupVars.keys()) {
+          if (!reps.some((r) => r.id === id)) {
+            this.typeNames.delete(id);
+          }
+        }
       }
     });
   }
@@ -843,8 +934,9 @@ class Gen {
     const tparams = generic && params.length > 0 ? `<${params.join(", ")}>` : "";
     const resultOf = (m: (typeof members)[number]): Type | undefined => {
       let t: Type | undefined = m.scheme === undefined ? undefined : prune(m.scheme.type);
-      for (let i = 0; i < m.params.length; i++)
+      for (let i = 0; i < m.params.length; i++) {
         t = t !== undefined && isFun(t) ? prune(t.args[1]) : undefined;
+      }
       return t;
     };
     const resultTypes = new Set(
@@ -854,7 +946,9 @@ class Gen {
       }),
     );
     const [result] = [...resultTypes];
-    if (resultTypes.size !== 1 || result === undefined || result === "?") return undefined;
+    if (resultTypes.size !== 1 || result === undefined || result === "?") {
+      return undefined;
+    }
 
     const callVar = this.fresh("call");
     const ownTypeArgs = (m: (typeof members)[number]): string =>
@@ -911,7 +1005,9 @@ class Gen {
       const inputs = m.params.map((p) => this.fresh(`${this.name(p)}$in`));
       const arrows = inputs.map((input, i) => {
         const head = `(${input}: ${types[i] ?? "unknown"})`;
-        if (i > 0) return `${head} =>`;
+        if (i > 0) {
+          return `${head} =>`;
+        }
         const t = m.scheme === undefined ? undefined : prune(m.scheme.type);
         return `${entryTparams}${head}: ${t !== undefined && isFun(t) ? this.tsReturn(t.args[1]) : result} =>`;
       });
@@ -928,7 +1024,9 @@ class Gen {
     e: CExpr,
     fns: ReadonlyMap<number, { readonly params: ReadonlyArray<Name> }>,
   ): Array<{ readonly callee: number; readonly at: Type | undefined }> {
-    if (this.isIOChain(e)) return [];
+    if (this.isIOChain(e)) {
+      return [];
+    }
     const inBody = (
       g: GuardedBody,
     ): Array<{ readonly callee: number; readonly at: Type | undefined }> => {
@@ -957,9 +1055,13 @@ class Gen {
           head = head.fn;
           n++;
         }
-        if (head._tag !== "Var") return [];
+        if (head._tag !== "Var") {
+          return [];
+        }
         const fn = fns.get(head.name.id);
-        if (fn === undefined || fn.params.length !== n) return [];
+        if (fn === undefined || fn.params.length !== n) {
+          return [];
+        }
         return [{ callee: head.name.id, at: this.tp.exprTypes.get(head) }];
       }
       default:
@@ -975,9 +1077,13 @@ class Gen {
       args.unshift(head.arg);
       head = head.fn;
     }
-    if (head._tag !== "Var") return undefined;
+    if (head._tag !== "Var") {
+      return undefined;
+    }
     const target = loop.targets.get(head.name.id);
-    if (target === undefined || args.length !== target.arity) return undefined;
+    if (target === undefined || args.length !== target.arity) {
+      return undefined;
+    }
     // A call at another type (polymorphic recursion) cannot reuse the loop's state.
     const targs = this.genericBinders.has(head.name.id)
       ? this.typeArgs(this.tp.schemes.get(head.name.id), this.tp.exprTypes.get(head))
@@ -987,7 +1093,9 @@ class Gen {
 
   /** Whether `e` has a self call in tail position (outside `Effect.gen`, which is stack-safe). */
   private hasTailCall(e: CExpr, loop: Loop): boolean {
-    if (this.isIOChain(e)) return false;
+    if (this.isIOChain(e)) {
+      return false;
+    }
     const inBody = (g: GuardedBody): boolean => {
       switch (g._tag) {
         case "Body":
@@ -1121,9 +1229,13 @@ class Gen {
     | { readonly kind: "bind"; readonly action: CExpr; readonly param: Name; readonly rest: CExpr }
     | { readonly kind: "then"; readonly action: CExpr; readonly rest: CExpr }
     | undefined {
-    if (e._tag !== "App" || e.fn._tag !== "App" || e.fn.fn._tag !== "Prim") return undefined;
+    if (e._tag !== "App" || e.fn._tag !== "App" || e.fn.fn._tag !== "Prim") {
+      return undefined;
+    }
     const action = e.fn.arg;
-    if (e.fn.fn.name === ">>") return { kind: "then", action, rest: e.arg };
+    if (e.fn.fn.name === ">>") {
+      return { kind: "then", action, rest: e.arg };
+    }
     if (e.fn.fn.name === ">>=" && e.arg._tag === "Lam") {
       return { kind: "bind", action, param: e.arg.param, rest: e.arg.body };
     }
@@ -1132,7 +1244,9 @@ class Gen {
 
   /** Whether `e` is (a `let` around) a sequence of IO actions, emitted as `Effect.gen`. */
   private isIOChain(e: CExpr): boolean {
-    if (e._tag === "Let") return this.isIOChain(e.body);
+    if (e._tag === "Let") {
+      return this.isIOChain(e.body);
+    }
     return this.ioStep(e) !== undefined;
   }
 
@@ -1175,10 +1289,16 @@ class Gen {
           count: (known?.count ?? 0) + 1,
           bindings: known?.bindings ?? d.bindings,
         });
-        if (d.fallback) visit(d.fallback);
+        if (d.fallback) {
+          visit(d.fallback);
+        }
       } else if (d._tag === "Switch") {
-        for (const c of d.cases) visit(c.body);
-        if (d.default) visit(d.default);
+        for (const c of d.cases) {
+          visit(c.body);
+        }
+        if (d.default) {
+          visit(d.default);
+        }
       }
     };
     visit(compiled.tree);
@@ -1190,14 +1310,18 @@ class Gen {
       const result = this.ts(this.typeOf(m));
       for (const [clause, { count, bindings }] of leaves) {
         const c = m.clauses[clause];
-        if (count < 2 || c === undefined) continue;
+        if (count < 2 || c === undefined) {
+          continue;
+        }
         const fn = this.fresh(`clause${clause + 1}`);
         const params = bindings.map((b) => {
           const t = this.tp.varTypes.get(b.name.id);
           return `${this.name(b.name)}: ${t === undefined ? "unknown" : this.ts(t)}`;
         });
         const fail = this.fresh("fail");
-        if (canFail[clause] === true) params.push(`${fail}: () => ${result}`);
+        if (canFail[clause] === true) {
+          params.push(`${fail}: () => ${result}`);
+        }
         const inner = `${indent}  `;
         out.push(
           `${indent}const ${fn} = (${params.join(", ")}): ${result} => {`,
@@ -1248,7 +1372,9 @@ class Gen {
           return [`${indent}return ${join.fn}(${args.join(", ")});`];
         }
         const clause = m.clauses[d.clause];
-        if (clause === undefined) return [];
+        if (clause === undefined) {
+          return [];
+        }
         return [
           ...d.bindings.map((b) => `${indent}const ${this.name(b.name)} = ${b.occ};`),
           ...this.guarded(clause.body, indent, mode),
@@ -1293,7 +1419,9 @@ class Gen {
             `${indent}}`,
           );
         }
-        if (rest !== undefined) out.push(...this.decision(rest, m, indent, mode, joins));
+        if (rest !== undefined) {
+          out.push(...this.decision(rest, m, indent, mode, joins));
+        }
         return out;
       }
     }
@@ -1301,7 +1429,9 @@ class Gen {
 
   /** Warns about non-exhaustive matches and redundant clauses, as GHC does. */
   private checkMatch(m: Match, compiled: CompiledMatch): void {
-    if (m.context === "do-block pattern" || m.context === "pattern binding") return;
+    if (m.context === "do-block pattern" || m.context === "pattern binding") {
+      return;
+    }
     if (compiled.missing.length > 0) {
       const shown = [...new Set(compiled.missing.map((w) => (w.length === 0 ? "_" : w.join(" "))))];
       const list = shown.slice(0, 3).join(", ") + (shown.length > 3 ? ", …" : "");
@@ -1369,7 +1499,9 @@ class Gen {
   }
 
   private expr(e: CExpr, indent: string): Code {
-    if (this.isIOChain(e)) return this.gen(e, indent);
+    if (this.isIOChain(e)) {
+      return this.gen(e, indent);
+    }
     switch (e._tag) {
       case "Var":
         return atom(this.name(e.name));
@@ -1395,7 +1527,9 @@ class Gen {
       case "Match":
         return this.iife(e, indent);
       case "If":
-        if (this.needsStatements(e)) return this.iife(e, indent);
+        if (this.needsStatements(e)) {
+          return this.iife(e, indent);
+        }
         return atom(
           `(${this.expr(e.cond, indent).code} ? ${this.expr(e.thenBranch, indent).code} : ${this.expr(e.elseBranch, indent).code})`,
         );
@@ -1414,12 +1548,16 @@ class Gen {
     }
     const arg = (i: number): string => {
       const a = args[i];
-      if (a === undefined) throw new CodegenError("internal: missing argument", e.span);
+      if (a === undefined) {
+        throw new CodegenError("internal: missing argument", e.span);
+      }
       return this.expr(a, indent).code;
     };
     const argType = (i: number): Type => {
       const a = args[i];
-      if (a === undefined) throw new CodegenError("internal: missing argument", e.span);
+      if (a === undefined) {
+        throw new CodegenError("internal: missing argument", e.span);
+      }
       return this.typeOf(a);
     };
     const call = (fn: string, from: number): Code =>
@@ -1433,9 +1571,13 @@ class Gen {
 
     if (head._tag === "Prim") {
       const special = this.primApplication(head, args.length, arg, argType);
-      if (special !== undefined) return special;
+      if (special !== undefined) {
+        return special;
+      }
       const unsupported = unsupportedPrims.get(head.name);
-      if (unsupported !== undefined) throw new CodegenError(unsupported, head.span);
+      if (unsupported !== undefined) {
+        throw new CodegenError(unsupported, head.span);
+      }
       const js = `rt.${primJs[head.name] ?? head.name}`;
       const targs =
         args.length > 0
@@ -1446,7 +1588,9 @@ class Gen {
 
     if (head._tag === "Con") {
       const special = this.conApplication(head, args.length, arg, argType);
-      if (special !== undefined) return special;
+      if (special !== undefined) {
+        return special;
+      }
       const builtin = ["Just", "Left", "Right", "Nothing"].includes(head.name);
       const js = builtin ? `rt.${head.name}` : head.name;
       const scheme = this.tp.conScheme(head.name);
@@ -1458,7 +1602,9 @@ class Gen {
     }
 
     if (head._tag === "Var") {
-      if (args.length === 0) return atom(this.name(head.name));
+      if (args.length === 0) {
+        return atom(this.name(head.name));
+      }
       const targs = this.genericBinders.has(head.name.id)
         ? this.typeArgs(this.tp.schemes.get(head.name.id), this.tp.exprTypes.get(head))
         : "";
@@ -1497,16 +1643,22 @@ class Gen {
       case "mod":
         return n === 2 ? atom(`rt.modInt(${arg(0)}, ${arg(1)})`) : undefined;
       case "==":
-        if (n !== 2) return undefined;
+        if (n !== 2) {
+          return undefined;
+        }
         return isPrimType(argType(0)) ? binary("===") : atom(`rt.equals(${arg(0)}, ${arg(1)})`);
       case "/=":
-        if (n !== 2) return undefined;
+        if (n !== 2) {
+          return undefined;
+        }
         return isPrimType(argType(0)) ? binary("!==") : atom(`(!rt.equals(${arg(0)}, ${arg(1)}))`);
       case "<":
       case "<=":
       case ">":
       case ">=":
-        if (n !== 2) return undefined;
+        if (n !== 2) {
+          return undefined;
+        }
         return isOrdPrim(argType(0))
           ? binary(head.name)
           : atom(`(rt.compareAny(${arg(0)}, ${arg(1)}) ${head.name} 0)`);
@@ -1526,8 +1678,12 @@ class Gen {
         const t = firstParam();
         const fn = head.name === "show" ? "rt.showWith" : "rt.printWith";
         const shower = `${fn}(${t === undefined ? "rt.showAny" : this.shower(t)})`;
-        if (n === 0) return atom(shower);
-        if (n === 1) return atom(`${shower}(${arg(0)})`);
+        if (n === 0) {
+          return atom(shower);
+        }
+        if (n === 1) {
+          return atom(`${shower}(${arg(0)})`);
+        }
         return undefined;
       }
       default:
@@ -1556,15 +1712,22 @@ class Gen {
           n >= 1
             ? `<${this.ts(argType(0))}>`
             : this.typeArgs(this.tp.conScheme(":"), this.tp.exprTypes.get(head));
-        if (n === 2) return atom(`rt.Cons${elem}(${arg(0)}, ${arg(1)})`);
-        if (n === 1) return atom(`rt.cons${elem}(${arg(0)})`);
+        if (n === 2) {
+          return atom(`rt.Cons${elem}(${arg(0)}, ${arg(1)})`);
+        }
+        if (n === 1) {
+          return atom(`rt.cons${elem}(${arg(0)})`);
+        }
         return atom(`rt.cons${elem}`);
       }
     }
     const arity = tupleArity(head.name);
-    if (arity === undefined) return undefined;
-    if (n === arity)
+    if (arity === undefined) {
+      return undefined;
+    }
+    if (n === arity) {
       return low(`[${Array.from({ length: arity }, (_, i) => arg(i)).join(", ")}] as const`);
+    }
     // Partially applied tuple constructor: a curried lambda.
     const t = this.tp.exprTypes.get(head);
     const params: Array<string> = [];
@@ -1586,10 +1749,14 @@ class Gen {
   program(): string {
     const body: Array<string> = [];
     for (const d of this.tp.program.data) {
-      if (d.builtin) continue;
+      if (d.builtin) {
+        continue;
+      }
       body.push(...this.dataDecl(d), "");
     }
-    for (const g of this.tp.program.groups) body.push(...this.group(g, "", true), "");
+    for (const g of this.tp.program.groups) {
+      body.push(...this.group(g, "", true), "");
+    }
     const effectImport = this.effect === "Effect" ? "Effect" : `Effect as ${this.effect}`;
     return [
       `// Generated by haskell-to-effect from ${this.options.fileName}. Do not edit.`,

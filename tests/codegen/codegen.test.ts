@@ -6,7 +6,9 @@ const lines = (...ls: Array<string>): string => ls.join("\n");
 
 const code = (...ls: Array<string>): string => {
   const r = compile(lines(...ls), { fileName: "Main.hs" });
-  if (Result.isFailure(r)) throw new Error(r.failure.message);
+  if (Result.isFailure(r)) {
+    throw new Error(r.failure.message);
+  }
   return r.success.code;
 };
 
@@ -169,7 +171,11 @@ describe("deep recursion", () => {
     expect(c).toContain("const len$deep = function* <a>(arg: rt.List<a>): rt.Deep<number> {");
     expect(c).toContain("return (1 + ((yield len$deep<a>(xs)) as number));");
     expect(c).toContain(
-      "if (rt.stack.depth >= rt.maxDepth) return rt.trampoline(len$deep<a>(arg$in));",
+      [
+        "  if (rt.stack.depth >= rt.maxDepth) {",
+        "    return rt.trampoline(len$deep<a>(arg$in));",
+        "  }",
+      ].join("\n"),
     );
     expect(c).toContain("return len$direct<a>(arg$in);");
     // The direct version recurses through the counting entry point.

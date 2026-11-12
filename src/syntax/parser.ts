@@ -43,8 +43,12 @@ const resolveInfix = (items: ReadonlyArray<InfixItem>): Expr => {
 
   const parseNeg = (op1: NamedFixity): Expr => {
     const item = items[i++];
-    if (item === undefined) throw new Error("resolveInfix: missing operand");
-    if (item._tag === "Operand") return parse1(op1, item.expr);
+    if (item === undefined) {
+      throw new Error("resolveInfix: missing operand");
+    }
+    if (item._tag === "Operand") {
+      return parse1(op1, item.expr);
+    }
     if (item._tag === "Negate") {
       if (op1.prec >= 6) {
         throw new ParseError({
@@ -61,8 +65,12 @@ const resolveInfix = (items: ReadonlyArray<InfixItem>): Expr => {
   const parse1 = (op1: NamedFixity, e1: Expr): Expr => {
     for (;;) {
       const item = items[i];
-      if (item === undefined) return e1;
-      if (item._tag !== "Operator") throw new Error("resolveInfix: expected operator");
+      if (item === undefined) {
+        return e1;
+      }
+      if (item._tag !== "Operator") {
+        throw new Error("resolveInfix: expected operator");
+      }
       const op2: NamedFixity = { name: item.op.name, ...fixityOf(item.op.name) };
       if (op1.prec === op2.prec && (op1.assoc !== op2.assoc || op1.assoc === "none")) {
         throw new ParseError({
@@ -70,7 +78,9 @@ const resolveInfix = (items: ReadonlyArray<InfixItem>): Expr => {
           span: item.op.span,
         });
       }
-      if (op1.prec > op2.prec || (op1.prec === op2.prec && op1.assoc === "left")) return e1;
+      if (op1.prec > op2.prec || (op1.prec === op2.prec && op1.assoc === "left")) {
+        return e1;
+      }
       i++;
       const r = parseNeg(op2);
       e1 = { _tag: "BinOp", op: item.op, left: e1, right: r, span: merge(e1.span, r.span) };
@@ -117,8 +127,12 @@ class Parser {
 
   private next(): Token {
     const t = this.peek();
-    if (t._tag !== "EOF") this.i++;
-    if (!(t._tag === "Special" && t.virtual)) this.lastReal = t.span;
+    if (t._tag !== "EOF") {
+      this.i++;
+    }
+    if (!(t._tag === "Special" && t.virtual)) {
+      this.lastReal = t.span;
+    }
     return t;
   }
 
@@ -145,7 +159,9 @@ class Parser {
   }
 
   private expect(tag: Token["_tag"], text: string, expected = `'${text}'`): Token {
-    if (!this.is(tag, text)) throw this.unexpected(expected);
+    if (!this.is(tag, text)) {
+      throw this.unexpected(expected);
+    }
     return this.next();
   }
 
@@ -157,13 +173,17 @@ class Parser {
 
   expressionOnly(): Expr {
     const e = this.exp();
-    if (!this.is("EOF")) throw this.unexpected("end of input");
+    if (!this.is("EOF")) {
+      throw this.unexpected("end of input");
+    }
     return e;
   }
 
   typeOnly(): Type {
     const t = this.type();
-    if (!this.is("EOF")) throw this.unexpected("end of input");
+    if (!this.is("EOF")) {
+      throw this.unexpected("end of input");
+    }
     return t;
   }
 
@@ -175,10 +195,14 @@ class Parser {
     if (this.is("ReservedId", "module")) {
       this.next();
       const id = this.peek();
-      if (id._tag !== "ConId") throw this.unexpected("a module name");
+      if (id._tag !== "ConId") {
+        throw this.unexpected("a module name");
+      }
       this.next();
       name = id.text;
-      if (this.isSpecial("(")) exports = this.exportList();
+      if (this.isSpecial("(")) {
+        exports = this.exportList();
+      }
       this.expect("ReservedId", "where");
     }
     const decls = this.block(
@@ -186,7 +210,9 @@ class Parser {
       () => this.isTopDeclStart(),
       () => this.topDecl(),
     );
-    if (!this.is("EOF")) throw this.unexpected("end of input");
+    if (!this.is("EOF")) {
+      throw this.unexpected("end of input");
+    }
     return { name, exports, decls, span: this.spanFrom(start) };
   }
 
@@ -202,7 +228,9 @@ class Parser {
           // `T(..)` or `T(A, B)`: constructors are exported with the type.
           this.next();
           while (!this.isSpecial(")")) {
-            if (this.is("EOF")) throw this.unexpected("')'");
+            if (this.is("EOF")) {
+              throw this.unexpected("')'");
+            }
             this.next();
           }
           this.next();
@@ -217,7 +245,9 @@ class Parser {
       } else {
         throw this.unexpected("an exported name");
       }
-      if (!this.isSpecial(",")) break;
+      if (!this.isSpecial(",")) {
+        break;
+      }
       this.next();
     }
     this.expectSpecial(")");
@@ -235,9 +265,13 @@ class Parser {
   private topDecl(): TopDecl {
     const t = this.peek();
     if (t._tag === "ReservedId") {
-      if (t.text === "data") return this.dataDecl();
+      if (t.text === "data") {
+        return this.dataDecl();
+      }
       const unsupported = unsupportedTopDecls[t.text];
-      if (unsupported !== undefined) throw this.error(unsupported);
+      if (unsupported !== undefined) {
+        throw this.error(unsupported);
+      }
     }
     return this.decl();
   }
@@ -246,10 +280,14 @@ class Parser {
   private dataDecl(): DataDecl {
     const start = this.next().span;
     const name = this.peek();
-    if (name._tag !== "ConId") throw this.unexpected("a type name");
+    if (name._tag !== "ConId") {
+      throw this.unexpected("a type name");
+    }
     this.next();
     const params: Array<string> = [];
-    while (this.is("VarId")) params.push(this.next().text);
+    while (this.is("VarId")) {
+      params.push(this.next().text);
+    }
     const constructors: Array<ConDecl> = [];
     if (this.is("ReservedOp", "=")) {
       this.next();
@@ -266,13 +304,17 @@ class Parser {
         this.next();
         while (this.is("ConId")) {
           deriving.push(this.next().text);
-          if (!this.isSpecial(",")) break;
+          if (!this.isSpecial(",")) {
+            break;
+          }
           this.next();
         }
         this.expectSpecial(")");
       } else {
         const cls = this.peek();
-        if (cls._tag !== "ConId") throw this.unexpected("a class name");
+        if (cls._tag !== "ConId") {
+          throw this.unexpected("a class name");
+        }
         deriving.push(this.next().text);
       }
     }
@@ -298,10 +340,15 @@ class Parser {
     this.next();
     const fields: Array<Type> = [];
     for (;;) {
-      if (this.isAtypeStart()) fields.push(this.atype());
-      else if (this.is("VarSym", "!")) throw this.error("strictness annotations are not supported");
-      else if (this.isSpecial("{")) throw this.error("record syntax is not supported");
-      else break;
+      if (this.isAtypeStart()) {
+        fields.push(this.atype());
+      } else if (this.is("VarSym", "!")) {
+        throw this.error("strictness annotations are not supported");
+      } else if (this.isSpecial("{")) {
+        throw this.error("record syntax is not supported");
+      } else {
+        break;
+      }
     }
     return { name: name.text, fields, span: this.spanFrom(name.span) };
   }
@@ -311,8 +358,12 @@ class Parser {
   /** `type → btype [-> type]` */
   private type(): Type {
     const from = this.btype();
-    if (this.is("ReservedOp", "=>")) throw this.error("type class constraints are not supported");
-    if (!this.is("ReservedOp", "->")) return from;
+    if (this.is("ReservedOp", "=>")) {
+      throw this.error("type class constraints are not supported");
+    }
+    if (!this.is("ReservedOp", "->")) {
+      return from;
+    }
     this.next();
     const to = this.type();
     return { _tag: "TFun", from, to, span: merge(from.span, to.span) };
@@ -344,15 +395,17 @@ class Parser {
     }
     if (this.isSpecial("[")) {
       const open = this.next().span;
-      if (this.isSpecial("]"))
+      if (this.isSpecial("]")) {
         return { _tag: "TCon", name: "[]", span: merge(open, this.next().span) };
+      }
       const elem = this.type();
       return { _tag: "TList", elem, span: merge(open, this.expectSpecial("]").span) };
     }
     if (this.isSpecial("(")) {
       const open = this.next().span;
-      if (this.isSpecial(")"))
+      if (this.isSpecial(")")) {
         return { _tag: "TCon", name: "()", span: merge(open, this.next().span) };
+      }
       if (this.is("ReservedOp", "->") && this.isSpecial(")", 1)) {
         this.next();
         return { _tag: "TCon", name: "->", span: merge(open, this.next().span) };
@@ -388,7 +441,9 @@ class Parser {
   }
 
   private typeAnnotation(e: Expr): Expr {
-    if (!this.is("ReservedOp", "::")) return e;
+    if (!this.is("ReservedOp", "::")) {
+      return e;
+    }
     this.next();
     const type = this.type();
     return { _tag: "Typed", expr: e, type, span: merge(e.span, type.span) };
@@ -408,8 +463,9 @@ class Parser {
     if (this.isSpecial("`")) {
       const open = this.next();
       const t = this.peek();
-      if (t._tag !== "VarId" && t._tag !== "ConId")
+      if (t._tag !== "VarId" && t._tag !== "ConId") {
         throw this.unexpected("an identifier between backticks");
+      }
       this.next();
       const close = this.expectSpecial("`");
       return { name: t.text, span: merge(open.span, close.span) };
@@ -436,10 +492,16 @@ class Parser {
       const openEnded =
         this.is("ReservedOp", "\\") || this.is("ReservedId", "let") || this.is("ReservedId", "if");
       items.push({ _tag: "Operand", expr: this.lexp() });
-      if (openEnded) break;
-      if (!this.isOperatorStart()) break;
+      if (openEnded) {
+        break;
+      }
+      if (!this.isOperatorStart()) {
+        break;
+      }
       const op = this.opRef();
-      if (allowTrailingOp && this.isSpecial(")")) return { items, trailing: op };
+      if (allowTrailingOp && this.isSpecial(")")) {
+        return { items, trailing: op };
+      }
       items.push({ _tag: "Operator", op });
     }
     return { items, trailing: undefined };
@@ -448,7 +510,9 @@ class Parser {
   /** `lexp → \ apat+ -> exp | let decls in exp | if exp then exp else exp | fexp` */
   private lexp(): Expr {
     const t = this.peek();
-    if (t._tag === "ReservedOp" && t.text === "\\") return this.lambda();
+    if (t._tag === "ReservedOp" && t.text === "\\") {
+      return this.lambda();
+    }
     if (t._tag === "ReservedId") {
       switch (t.text) {
         case "let":
@@ -467,8 +531,12 @@ class Parser {
   private lambda(): Expr {
     const start = this.next().span;
     const params: Array<Pat> = [];
-    while (this.isApatStart()) params.push(this.apat());
-    if (params.length === 0) throw this.unexpected("a pattern");
+    while (this.isApatStart()) {
+      params.push(this.apat());
+    }
+    if (params.length === 0) {
+      throw this.unexpected("a pattern");
+    }
     this.expect("ReservedOp", "->");
     const body = this.exp();
     return { _tag: "Lambda", params, body, span: merge(start, body.span) };
@@ -495,8 +563,9 @@ class Parser {
       () => this.isPatStart(),
       () => this.alt(),
     );
-    if (alts.length === 0)
+    if (alts.length === 0) {
       throw this.error("a 'case' expression needs at least one alternative", start);
+    }
     return { _tag: "Case", scrutinee, alts, span: this.spanFrom(start) };
   }
 
@@ -514,7 +583,9 @@ class Parser {
       () => this.stmt(),
     );
     const last = stmts[stmts.length - 1];
-    if (last === undefined) throw this.error("empty 'do' block", start);
+    if (last === undefined) {
+      throw this.error("empty 'do' block", start);
+    }
     if (last._tag !== "ExprStmt") {
       throw this.error("the last statement in a 'do' block must be an expression", last.span);
     }
@@ -542,8 +613,9 @@ class Parser {
         () => this.isApatStart(),
         () => this.decl(),
       );
-      if (!this.is("ReservedId", "in"))
+      if (!this.is("ReservedId", "in")) {
         return { _tag: "LetStmt", decls, span: this.spanFrom(start) };
+      }
       // `let … in e` used as an expression statement
       this.next();
       const body = this.exp();
@@ -560,7 +632,9 @@ class Parser {
         return { _tag: "BindStmt", pat, expr, span: merge(pat.span, expr.span) };
       }
     } catch (e) {
-      if (!(e instanceof ParseError)) throw e;
+      if (!(e instanceof ParseError)) {
+        throw e;
+      }
     }
     this.i = saved;
     const expr = this.exp();
@@ -570,10 +644,14 @@ class Parser {
   private ifExpr(): Expr {
     const start = this.next().span;
     const cond = this.exp();
-    if (this.isSpecial(";")) this.next();
+    if (this.isSpecial(";")) {
+      this.next();
+    }
     this.expect("ReservedId", "then");
     const thenBranch = this.exp();
-    if (this.isSpecial(";")) this.next();
+    if (this.isSpecial(";")) {
+      this.next();
+    }
     this.expect("ReservedId", "else");
     const elseBranch = this.exp();
     return { _tag: "If", cond, thenBranch, elseBranch, span: merge(start, elseBranch.span) };
@@ -614,8 +692,12 @@ class Parser {
       this.next();
       return { _tag: "Lit", lit: literalOf(t), span: t.span };
     }
-    if (this.isSpecial("(")) return this.parenExpr();
-    if (this.isSpecial("[")) return this.listExpr();
+    if (this.isSpecial("(")) {
+      return this.parenExpr();
+    }
+    if (this.isSpecial("[")) {
+      return this.listExpr();
+    }
     throw this.unexpected("an expression");
   }
 
@@ -630,7 +712,9 @@ class Parser {
       this.next();
       elems.push(this.exp());
     }
-    if (this.is("ReservedOp", "..")) throw this.error("arithmetic sequences are not supported");
+    if (this.is("ReservedOp", "..")) {
+      throw this.error("arithmetic sequences are not supported");
+    }
     const close = this.expectSpecial("]").span;
     return { _tag: "List", elems, span: merge(open, close) };
   }
@@ -687,7 +771,9 @@ class Parser {
       this.next();
       return first;
     }
-    if (!this.isSpecial(",")) throw this.unexpected("')' or ','");
+    if (!this.isSpecial(",")) {
+      throw this.unexpected("')' or ','");
+    }
     const elems = [first];
     while (this.isSpecial(",")) {
       this.next();
@@ -740,7 +826,9 @@ class Parser {
    */
   private block<A>(what: string, startsItem: () => boolean, item: () => A): Array<A> {
     const open = this.peek();
-    if (!(open._tag === "Special" && open.text === "{")) throw this.unexpected(`'{' or ${what}`);
+    if (!(open._tag === "Special" && open.text === "{")) {
+      throw this.unexpected(`'{' or ${what}`);
+    }
     this.next();
     const implicit = open.virtual === true;
     const isClose = (): boolean => {
@@ -765,11 +853,17 @@ class Parser {
       }
       if (startsItem()) {
         items.push(item());
-        if (this.isSpecial(";") || isClose()) continue;
-        if (implicit) return closeImplicit();
+        if (this.isSpecial(";") || isClose()) {
+          continue;
+        }
+        if (implicit) {
+          return closeImplicit();
+        }
         throw this.unexpected("';' or '}'");
       }
-      if (implicit) return closeImplicit();
+      if (implicit) {
+        return closeImplicit();
+      }
       throw this.unexpected(`${what} or '}'`);
     }
   }
@@ -785,10 +879,16 @@ class Parser {
       let params: Array<Pat> | undefined = [];
       try {
         this.next();
-        while (this.isApatStart()) params.push(this.apat());
-        if (!this.is("ReservedOp", "=") && !this.is("ReservedOp", "|")) params = undefined;
+        while (this.isApatStart()) {
+          params.push(this.apat());
+        }
+        if (!this.is("ReservedOp", "=") && !this.is("ReservedOp", "|")) {
+          params = undefined;
+        }
       } catch (e) {
-        if (!(e instanceof ParseError)) throw e;
+        if (!(e instanceof ParseError)) {
+          throw e;
+        }
         params = undefined;
       }
       if (params !== undefined) {
@@ -804,7 +904,9 @@ class Parser {
       this.i = saved;
     }
     const pat = this.pat();
-    if (!this.is("ReservedOp", "=") && !this.is("ReservedOp", "|")) throw this.unexpected("'='");
+    if (!this.is("ReservedOp", "=") && !this.is("ReservedOp", "|")) {
+      throw this.unexpected("'='");
+    }
     const rhs = this.rhs("=");
     return { _tag: "PatBind", pat, rhs, span: merge(pat.span, rhs.span) };
   }
@@ -816,7 +918,9 @@ class Parser {
     while (this.isSpecial(",")) {
       this.next();
       const t = this.peek();
-      if (t._tag !== "VarId") throw this.unexpected("a variable name");
+      if (t._tag !== "VarId") {
+        throw this.unexpected("a variable name");
+      }
       names.push(this.next().text);
     }
     this.expect("ReservedOp", "::");
@@ -835,9 +939,12 @@ class Parser {
       while (this.is("ReservedOp", "|")) {
         const bar = this.next().span;
         const guard = this.exp();
-        if (this.is("ReservedOp", "<-")) throw this.error("pattern guards are not supported");
-        if (this.isSpecial(","))
+        if (this.is("ReservedOp", "<-")) {
+          throw this.error("pattern guards are not supported");
+        }
+        if (this.isSpecial(",")) {
           throw this.error("multiple guards in one alternative are not supported; use '&&'");
+        }
         this.expect("ReservedOp", sep);
         const body = this.exp();
         guards.push({ guard, body, span: merge(bar, body.span) });
@@ -852,7 +959,9 @@ class Parser {
   }
 
   private whereDecls(): Array<Decl> {
-    if (!this.is("ReservedId", "where")) return [];
+    if (!this.is("ReservedId", "where")) {
+      return [];
+    }
     this.next();
     return this.block(
       "a declaration",
@@ -899,7 +1008,9 @@ class Parser {
     if (t._tag === "ConId") {
       this.next();
       const args: Array<Pat> = [];
-      while (this.isApatStart()) args.push(this.apat());
+      while (this.isApatStart()) {
+        args.push(this.apat());
+      }
       const end = args[args.length - 1]?.span ?? t.span;
       return { _tag: "PCon", name: t.text, args, span: merge(t.span, end) };
     }
@@ -945,9 +1056,15 @@ class Parser {
       this.next();
       return { _tag: "PLit", lit: literalOf(t), span: t.span };
     }
-    if (this.isSpecial("(")) return this.parenPat();
-    if (this.isSpecial("[")) return this.listPat();
-    if (this.is("ReservedOp", "~")) throw this.error("lazy patterns are not supported");
+    if (this.isSpecial("(")) {
+      return this.parenPat();
+    }
+    if (this.isSpecial("[")) {
+      return this.listPat();
+    }
+    if (this.is("ReservedOp", "~")) {
+      throw this.error("lazy patterns are not supported");
+    }
     throw this.unexpected("a pattern");
   }
 
@@ -966,7 +1083,9 @@ class Parser {
       this.next();
       return first;
     }
-    if (!this.isSpecial(",")) throw this.unexpected("')' or ','");
+    if (!this.isSpecial(",")) {
+      throw this.unexpected("')' or ','");
+    }
     const elems = [first];
     while (this.isSpecial(",")) {
       this.next();
@@ -997,11 +1116,15 @@ const runParser = <A>(
   entry: (p: Parser) => A,
 ): Result.Result<A, LexError | ParseError> => {
   const tokens = lex(source);
-  if (Result.isFailure(tokens)) return Result.fail(tokens.failure);
+  if (Result.isFailure(tokens)) {
+    return Result.fail(tokens.failure);
+  }
   try {
     return Result.succeed(entry(new Parser(new LayoutStream(tokens.success, mode))));
   } catch (e) {
-    if (e instanceof ParseError) return Result.fail(e);
+    if (e instanceof ParseError) {
+      return Result.fail(e);
+    }
     throw e;
   }
 };

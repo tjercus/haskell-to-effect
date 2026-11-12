@@ -1,15 +1,16 @@
+import { Schema } from "effect";
+
 /** A position in the source text. `line` and `col` are 1-based; `offset` is 0-based. */
-export interface Pos {
-  readonly offset: number;
-  readonly line: number;
-  readonly col: number;
-}
+export const Pos = Schema.Struct({
+  offset: Schema.Number,
+  line: Schema.Number,
+  col: Schema.Number,
+});
+export type Pos = typeof Pos.Type;
 
 /** A half-open source range `[start, end)`. */
-export interface Span {
-  readonly start: Pos;
-  readonly end: Pos;
-}
+export const Span = Schema.Struct({ start: Pos, end: Pos });
+export type Span = typeof Span.Type;
 
 export const span = (start: Pos, end: Pos): Span => ({ start, end });
 

@@ -39,7 +39,9 @@ class Lexer {
   run(): Array<Token> {
     for (;;) {
       this.skipWhitespaceAndComments();
-      if (this.atEnd()) break;
+      if (this.atEnd()) {
+        break;
+      }
       this.lexToken();
     }
     const here = this.pos();
@@ -86,7 +88,9 @@ class Lexer {
       if (isWhite(c)) {
         this.advance();
       } else if (c === "-" && this.peek(1) === "-" && this.isLineComment()) {
-        while (!this.atEnd() && this.peek() !== "\n" && this.peek() !== "\r") this.advance();
+        while (!this.atEnd() && this.peek() !== "\n" && this.peek() !== "\r") {
+          this.advance();
+        }
       } else if (c === "{" && this.peek(1) === "-") {
         this.skipBlockComment();
       } else {
@@ -98,7 +102,9 @@ class Lexer {
   /** `--` starts a comment only if the whole symbol run is dashes (so `-->` is an operator). */
   private isLineComment(): boolean {
     let i = this.offset;
-    while (this.src[i] === "-") i++;
+    while (this.src[i] === "-") {
+      i++;
+    }
     const next = this.src[i] ?? "";
     return !isSymbolChar(next);
   }
@@ -109,7 +115,9 @@ class Lexer {
     this.advance();
     let depth = 1;
     while (depth > 0) {
-      if (this.atEnd()) throw this.error("unterminated block comment", start);
+      if (this.atEnd()) {
+        throw this.error("unterminated block comment", start);
+      }
       if (this.peek() === "{" && this.peek(1) === "-") {
         this.advance();
         this.advance();
@@ -150,9 +158,13 @@ class Lexer {
     } else if (isSymbolChar(c)) {
       const text = this.takeWhile(isSymbolChar);
       const s = span(start, this.pos());
-      if (reservedOps.has(text)) this.push({ _tag: "ReservedOp", text, span: s });
-      else if (text.startsWith(":")) this.push({ _tag: "ConSym", text, span: s });
-      else this.push({ _tag: "VarSym", text, span: s });
+      if (reservedOps.has(text)) {
+        this.push({ _tag: "ReservedOp", text, span: s });
+      } else if (text.startsWith(":")) {
+        this.push({ _tag: "ConSym", text, span: s });
+      } else {
+        this.push({ _tag: "VarSym", text, span: s });
+      }
     } else if (isDigit(c)) {
       this.lexNumber(start);
     } else if (c === "'") {
@@ -171,7 +183,9 @@ class Lexer {
 
   private takeWhile(pred: (c: string) => boolean): string {
     const begin = this.offset;
-    while (!this.atEnd() && pred(this.peek())) this.advance();
+    while (!this.atEnd() && pred(this.peek())) {
+      this.advance();
+    }
     return this.src.slice(begin, this.offset);
   }
 
@@ -209,8 +223,12 @@ class Lexer {
       throw this.error("empty character literal", start);
     }
     const value = this.lexCharBody(start, "char");
-    if (value === undefined) throw this.error("'\\&' is not allowed in a character literal", start);
-    if (this.peek() !== "'") throw this.error("unterminated character literal", start);
+    if (value === undefined) {
+      throw this.error("'\\&' is not allowed in a character literal", start);
+    }
+    if (this.peek() !== "'") {
+      throw this.error("unterminated character literal", start);
+    }
     this.advance();
     const s = span(start, this.pos());
     this.push({ _tag: "Char", text: this.src.slice(start.offset, s.end.offset), value, span: s });
@@ -221,9 +239,12 @@ class Lexer {
     let value = "";
     for (;;) {
       const c = this.peek();
-      if (this.atEnd() || c === "\n" || c === "\r")
+      if (this.atEnd() || c === "\n" || c === "\r") {
         throw this.error("unterminated string literal", start);
-      if (c === '"') break;
+      }
+      if (c === '"') {
+        break;
+      }
       if (c === "\\" && isWhite(this.peek(1))) {
         this.skipStringGap(start);
         continue;
@@ -238,21 +259,27 @@ class Lexer {
   /** `\ <whitespace> \` inside a string is ignored. */
   private skipStringGap(litStart: Pos): void {
     this.advance();
-    while (isWhite(this.peek())) this.advance();
-    if (this.peek() !== "\\")
+    while (isWhite(this.peek())) {
+      this.advance();
+    }
+    if (this.peek() !== "\\") {
       throw this.error("invalid string gap: expected '\\' after whitespace", litStart);
+    }
     this.advance();
   }
 
   /** One (possibly escaped) character. Returns `undefined` for the empty escape `\&`. */
   private lexCharBody(litStart: Pos, kind: "char" | "string"): string | undefined {
     const c = this.peek();
-    if (this.atEnd() || c === "\n" || c === "\r")
+    if (this.atEnd() || c === "\n" || c === "\r") {
       throw this.error(`unterminated ${kind} literal`, litStart);
+    }
     if (c !== "\\") {
       const cp = this.src.codePointAt(this.offset) ?? 0;
       const ch = String.fromCodePoint(cp);
-      for (let i = 0; i < ch.length; i++) this.advance();
+      for (let i = 0; i < ch.length; i++) {
+        this.advance();
+      }
       return ch;
     }
     const escStart = this.pos();
@@ -281,11 +308,15 @@ class Lexer {
       digits = this.takeWhile(isOctDigit);
       radix = 8;
     } else {
-      if (!this.atEnd()) this.advance();
+      if (!this.atEnd()) {
+        this.advance();
+      }
       throw this.error(`unsupported escape sequence '\\${e}'`, escStart);
     }
     const cp = Number.parseInt(digits, radix);
-    if (cp > 0x10ffff) throw this.error("character code is out of range", escStart);
+    if (cp > 0x10ffff) {
+      throw this.error("character code is out of range", escStart);
+    }
     return String.fromCodePoint(cp);
   }
 }
@@ -295,7 +326,9 @@ export const lex = (source: string): Result.Result<ReadonlyArray<Token>, LexErro
   try {
     return Result.succeed(new Lexer(source).run());
   } catch (e) {
-    if (e instanceof LexError) return Result.fail(e);
+    if (e instanceof LexError) {
+      return Result.fail(e);
+    }
     throw e;
   }
 };

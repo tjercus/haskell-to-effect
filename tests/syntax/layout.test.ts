@@ -7,7 +7,9 @@ import { parseErr, parseOk, stripSpans } from "./helpers.ts";
 /** Token texts after layout, with virtual braces and semicolons rendered like explicit ones. */
 const render = (src: string, mode: LayoutMode = "module"): string => {
   const tokens = lex(src);
-  if (Result.isFailure(tokens)) throw new Error(tokens.failure.message);
+  if (Result.isFailure(tokens)) {
+    throw new Error(tokens.failure.message);
+  }
   return layoutAll(tokens.success, mode)
     .filter((t) => t._tag !== "EOF")
     .map((t) => t.text)

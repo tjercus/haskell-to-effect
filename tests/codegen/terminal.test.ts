@@ -26,7 +26,9 @@ test("a compiled program reads and writes through the Terminal service", async (
     "  print (length n)",
   ].join("\n");
   const r = compile(source, { fileName: "Main.hs" });
-  if (Result.isFailure(r)) throw new Error(r.failure.message);
+  if (Result.isFailure(r)) {
+    throw new Error(r.failure.message);
+  }
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, "Main.ts"), r.success.code);
   writeFileSync(join(outDir, "hs-runtime.ts"), runtimeSource());

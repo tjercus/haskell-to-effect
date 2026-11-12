@@ -6,7 +6,9 @@ const lines = (...ls: Array<string>): string => ls.join("\n");
 
 const compiled = (...ls: Array<string>): Compiled => {
   const r = compile(lines(...ls, "main = return ()"), { fileName: "Main.hs" });
-  if (Result.isFailure(r)) throw new Error(r.failure.message);
+  if (Result.isFailure(r)) {
+    throw new Error(r.failure.message);
+  }
   return r.success;
 };
 

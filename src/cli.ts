@@ -9,7 +9,7 @@
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Console, Effect, FileSystem, Option, Path, Result } from "effect";
 import { Argument, Command, Flag } from "effect/cli";
-import { spawnSync } from "node:child_process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { fileURLToPath } from "node:url";
 import {
   type Compiled,
@@ -25,43 +25,49 @@ const sourceFile = Argument.File("file", { mustExist: true }).pipe(
 );
 
 /** Compiles a file; on error prints the diagnostic and sets a failing exit code. */
-const compileFile = (file: string) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const source = yield* fs.readFileString(file);
-    const fileName = path.basename(file);
-    const result = compile(source, { fileName });
-    if (Result.isFailure(result)) {
-      yield* Console.error(formatError(result.failure, source, file));
-      process.exitCode = 1;
-      return Option.none<{ compiled: Compiled; moduleName: string }>();
-    }
-    for (const w of result.success.warnings) {
-      yield* Console.error(formatDiagnostic("warning", w, source, file));
-    }
-    const moduleName = fileName.replace(/\.l?hs$/, "");
-    return Option.some({ compiled: result.success, moduleName });
-  });
+const compileFile = Effect.fn("compileFile")(function* (file: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const source = yield* fs.readFileString(file);
+  const fileName = path.basename(file);
+  const result = compile(source, { fileName });
+  if (Result.isFailure(result)) {
+    yield* Console.error(formatError(result.failure, source, file));
+    process.exitCode = 1;
+    return Option.none<{ compiled: Compiled; moduleName: string }>();
+  }
+  for (const w of result.success.warnings) {
+    yield* Console.error(formatDiagnostic("warning", w, source, file));
+  }
+  const moduleName = fileName.replace(/\.l?hs$/, "");
+  return Option.some({ compiled: result.success, moduleName });
+});
 
 /** Writes `<Module>.ts`, `hs-runtime.ts` and `run.ts` to `dir`. Returns the entry file. */
-const writeOutput = (dir: string, compiled: Compiled, moduleName: string) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    yield* fs.makeDirectory(dir, { recursive: true });
-    const moduleFile = `${moduleName}.ts`;
-    yield* fs.writeFileString(path.join(dir, moduleFile), compiled.code);
-    yield* fs.writeFileString(path.join(dir, "hs-runtime.ts"), runtimeSource());
-    const entry = path.join(dir, "run.ts");
-    yield* fs.writeFileString(entry, entrySource(moduleFile, moduleName));
-    return entry;
-  });
+const writeOutput = Effect.fn("writeOutput")(function* (
+  dir: string,
+  compiled: Compiled,
+  moduleName: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  yield* fs.makeDirectory(dir, { recursive: true });
+  const moduleFile = `${moduleName}.ts`;
+  yield* fs.writeFileString(path.join(dir, moduleFile), compiled.code);
+  yield* fs.writeFileString(path.join(dir, "hs-runtime.ts"), runtimeSource());
+  const entry = path.join(dir, "run.ts");
+  yield* fs.writeFileString(entry, entrySource(moduleFile, moduleName));
+  return entry;
+});
 
-const check = Command.make("check", { file: sourceFile }, ({ file }) =>
-  Effect.gen(function* () {
+const check = Command.make(
+  "check",
+  { file: sourceFile },
+  Effect.fn("check")(function* ({ file }) {
     const result = yield* compileFile(file);
-    if (Option.isSome(result)) yield* Console.log(`${file}: OK`);
+    if (Option.isSome(result)) {
+      yield* Console.log(`${file}: OK`);
+    }
   }),
 ).pipe(Command.withDescription("Parse and type-check a Haskell module"));
 
@@ -75,33 +81,42 @@ const compileCommand = Command.make(
       Flag.optional,
     ),
   },
-  ({ file, out }) =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path;
-      const result = yield* compileFile(file);
-      if (Option.isNone(result)) return;
-      const dir = Option.getOrElse(out, () => path.dirname(file));
-      const entry = yield* writeOutput(dir, result.value.compiled, result.value.moduleName);
-      yield* Console.log(
-        `Wrote ${path.join(dir, `${result.value.moduleName}.ts`)}; run it with: node ${entry}`,
-      );
-    }),
-).pipe(Command.withDescription("Compile a Haskell module to TypeScript"));
-
-const run = Command.make("run", { file: sourceFile }, ({ file }) =>
-  Effect.gen(function* () {
+  Effect.fn("compile")(function* ({ file, out }) {
     const path = yield* Path.Path;
     const result = yield* compileFile(file);
-    if (Option.isNone(result)) return;
+    if (Option.isNone(result)) {
+      return;
+    }
+    const dir = Option.getOrElse(out, () => path.dirname(file));
+    const entry = yield* writeOutput(dir, result.value.compiled, result.value.moduleName);
+    yield* Console.log(
+      `Wrote ${path.join(dir, `${result.value.moduleName}.ts`)}; run it with: node ${entry}`,
+    );
+  }),
+).pipe(Command.withDescription("Compile a Haskell module to TypeScript"));
+
+const run = Command.make(
+  "run",
+  { file: sourceFile },
+  Effect.fn("run")(function* ({ file }) {
+    const path = yield* Path.Path;
+    const result = yield* compileFile(file);
+    if (Option.isNone(result)) {
+      return;
+    }
     // Compile into the package directory, so that the generated code can resolve `effect`.
     // (Node does not strip types from files under node_modules.)
     const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
     const dir = path.join(packageRoot, ".hs2effect", "run", result.value.moduleName);
     const entry = yield* writeOutput(dir, result.value.compiled, result.value.moduleName);
-    const child = yield* Effect.sync(() =>
-      spawnSync(process.execPath, [entry], { stdio: "inherit" }),
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    process.exitCode = yield* spawner.exitCode(
+      ChildProcess.make(process.execPath, [entry], {
+        stdin: "inherit",
+        stdout: "inherit",
+        stderr: "inherit",
+      }),
     );
-    process.exitCode = child.status ?? 1;
   }),
 ).pipe(Command.withDescription("Compile and run a Haskell module"));
 
