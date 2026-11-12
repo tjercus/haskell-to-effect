@@ -157,3 +157,54 @@ describe("mutual recursion", () => {
     expect(c).not.toContain("$loop");
   });
 });
+
+describe("deep recursion", () => {
+  test("non-tail recursion gets a generator version run on a trampoline when deep", () => {
+    const c = code(
+      "len :: [a] -> Int",
+      "len [] = 0",
+      "len (_ : xs) = 1 + len xs",
+      "main = print (len [1])",
+    );
+    expect(c).toContain("const len$deep = function* <a>(arg: rt.List<a>): rt.Deep<number> {");
+    expect(c).toContain("return (1 + ((yield len$deep<a>(xs)) as number));");
+    expect(c).toContain(
+      "if (rt.stack.depth >= rt.maxDepth) return rt.trampoline(len$deep<a>(arg$in));",
+    );
+    expect(c).toContain("return len$direct<a>(arg$in);");
+    // The direct version recurses through the counting entry point.
+    expect(c).toContain("return (1 + len<a>(xs));");
+  });
+
+  test("a match in expression position becomes a delegated generator", () => {
+    const c = code(
+      "f :: [Int] -> Int",
+      "f xs = 1 + (case xs of { [] -> 0; (_ : ys) -> f ys })",
+      "main = print (f [1])",
+    );
+    expect(c).toContain("(yield* (function* (): rt.Deep<number> {");
+  });
+
+  test("tail recursion and recursion inside do blocks and lambdas stay as they were", () => {
+    const c = code(
+      "go :: Int -> Int -> Int",
+      "go acc 0 = acc",
+      "go acc n = go (acc + n) (n - 1)",
+      "countdown :: Int -> IO ()",
+      "countdown 0 = return ()",
+      "countdown n = do { print n; countdown (n - 1) }",
+      "twice :: Int -> Int",
+      "twice n = if n == 0 then 0 else (\\x -> x + 2) (twice (n - 1))",
+      "lazy :: Int -> [Int -> Int]",
+      "lazy n = [\\x -> lazy x `seq'` n]",
+      "seq' :: a -> b -> b",
+      "seq' _ b = b",
+      "main = countdown (go 0 3)",
+    );
+    expect(c).not.toContain("go$deep");
+    expect(c).not.toContain("countdown$deep");
+    expect(c).not.toContain("lazy$deep");
+    // An argument is not a tail position.
+    expect(c).toContain("twice$deep");
+  });
+});

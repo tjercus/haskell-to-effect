@@ -149,17 +149,22 @@ the exceptions:
    - **Arithmetic is `Int` only.**
 3. **`Int` is a JavaScript number.** It is exact up to ±2⁵³ and does not wrap on overflow.
    `div` and `mod` round as in Haskell, and division by zero is an error.
-4. **Some recursion depth is limited.**
-   - **Tail calls are loops,** so they run at any depth:
+4. **Recursion through function values is limited in depth.** Other recursion runs at any
+   depth:
+   - **Tail calls are loops:**
      - calls a function makes to itself, such as accumulator loops, `go` helpers and
        `p x || anyOf p xs`, wherever they appear in `if`, `case` and guards
      - tail calls between mutually recursive functions, such as `isEven`/`isOdd` or a
        state machine: the group is merged into one loop
+   - **Other recursive calls,** such as `1 + len xs` or `x : append xs ys`, run on the
+     JavaScript stack while it is shallow. Beyond 1,000 nested calls they continue on a
+     stack on the heap, which is slower but unlimited.
    - **IO recursion** (loops in `do` blocks) is stack-safe.
    - **The Prelude list functions** are loops.
-   - **Other pure recursion** uses one JavaScript stack frame per call, so it overflows
-     Node's default stack around 10,000 calls deep. That covers non-tail calls like
-     `1 + len xs`.
+   - **The limit:** a function that recurses through a function value, such as
+     `size (Rose cs) = 1 + sum (map size cs)`, or a lambda calling it, uses JavaScript
+     stack frames on every level. It overflows Node's default stack a few thousand levels
+     deep, at about 2,000 for that `size`.
 5. **`show` is resolved from static types.** Inside a polymorphic function, where the
    static type is not known, `show` inspects the runtime value instead. That is exact,
    except that the empty string then shows as `[]` instead of `""`.
@@ -195,6 +200,8 @@ source → lexer → layout → parser → lowering → type inference → code 
   - **Pattern matching:** matches become decision trees (Maranget's algorithm), with
     exhaustiveness and redundancy warnings.
   - **IO:** `do` blocks become `Effect.gen`.
+  - **Recursion:** tail calls become loops. Functions with other recursive calls also get
+    a generator version that runs on a trampoline once the recursion is deep.
 - **Runtime** (`src/runtime/hs-runtime.ts`):
   - **Representation:** cons lists, and structural equality, ordering and `show`.
   - **The Prelude itself.**

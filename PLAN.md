@@ -215,8 +215,10 @@ Stretch: records, `type` synonyms, opt-in laziness.
 - **Deep recursion:** strict recursion over long lists can overflow the JS stack;
   `foldr`/`map`/`length` in the runtime are written iteratively. Tail calls in generated
   code become loops: self tail calls directly, and mutually recursive groups merged into
-  one loop over a tagged call (tested to 1,000,000 iterations). Non-tail recursion still
-  uses one JS frame per call, so depths around 10,000 overflow Node's default stack
-  (tested to 5,000).
+  one loop over a tagged call (tested to 1,000,000 iterations). Groups with non-tail
+  recursive calls also get a generator version: their entry points count the calls in
+  progress and, past 1,000, run it on a trampoline whose stack is on the heap (tested to
+  1,000,000 deep; shallow recursion such as `fib` is about as fast as before). Recursion
+  through function values (`map f` inside `f`) still uses the JS stack.
 - **Effect 4 API surface** (`Terminal`, `effect/cli`, `NodeRuntime`) — verify exact
   signatures when wiring milestones 6–7.

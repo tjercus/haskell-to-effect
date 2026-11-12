@@ -74,6 +74,40 @@ export const error = <A>(message: List<Char>): A => {
   throw new HaskellError(toJs(message));
 };
 
+// ---- deep recursion -----------------------------------------------------------------------
+
+/**
+ * A suspended call of a recursive function's generator version: it yields the calls it
+ * makes to its group (as further `Deep` generators) and is resumed with their results.
+ */
+export type Deep<A> = Generator<Deep<unknown>, A, unknown>;
+
+/**
+ * Recursive functions run directly while `stack.depth` (the number of their calls in
+ * progress) is below `maxDepth`; deeper calls run their generator version on `trampoline`,
+ * whose call stack is an array on the heap.
+ */
+export const stack = { depth: 0 };
+export const maxDepth = 1000;
+
+/** Runs a generator version and the calls it yields, with constant JS stack. */
+export const trampoline = <A>(start: Deep<A>): A => {
+  const calls: Array<Deep<unknown>> = [start];
+  let value: unknown = undefined;
+  for (;;) {
+    const top = calls[calls.length - 1];
+    if (top === undefined) return value as A;
+    const r = top.next(value);
+    if (r.done === true) {
+      calls.pop();
+      value = r.value;
+    } else {
+      calls.push(r.value);
+      value = undefined;
+    }
+  }
+};
+
 // ---- constructor order (for compare) ------------------------------------------------------
 
 const constructorIndex = new Map<string, number>([

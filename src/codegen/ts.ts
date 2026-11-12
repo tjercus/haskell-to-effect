@@ -95,6 +95,23 @@ interface Mode {
   readonly loop: Loop | undefined;
 }
 
+/**
+ * The generator versions of a recursive group's functions (`f$deep`), by `Name.id`. Inside
+ * a generator version, a saturated call to the group is `yield`ed to the trampoline instead
+ * of made on the JS stack.
+ */
+interface Deep {
+  readonly targets: ReadonlyMap<number, { readonly arity: number; readonly gen: string }>;
+}
+
+/** A function binding split into its parameters and body. */
+interface Fn {
+  readonly b: Bind;
+  readonly params: ReadonlyArray<Name>;
+  readonly body: CExpr;
+  readonly scheme: Scheme;
+}
+
 const PURE: Mode = { gen: false, loop: undefined };
 const GEN: Mode = { gen: true, loop: undefined };
 const atom = (code: string): Code => ({ code, atomic: true });
@@ -137,6 +154,10 @@ class Gen {
   /** Local name of the `Effect` module (renamed if a user type or constructor is `Effect`). */
   private readonly effect: string;
   private usesEffect = false;
+  /** Set while emitting the body of a generator version (and not inside nested functions). */
+  private deep: Deep | undefined = undefined;
+  /** Names the definitions of these binders get, when that differs from their references. */
+  private readonly defNames = new Map<number, string>();
   private readonly matcher: MatchCompiler;
   /** Warnings found while compiling pattern matches. */
   readonly warnings: Array<Warning> = [];
@@ -202,6 +223,17 @@ class Gen {
       return body(params);
     } finally {
       for (const v of vars) this.typeNames.delete(v.id);
+    }
+  }
+
+  /** Emits code for a nested function, where `yield` to an enclosing generator is not possible. */
+  private shallow<A>(f: () => A): A {
+    const saved = this.deep;
+    this.deep = undefined;
+    try {
+      return f();
+    } finally {
+      this.deep = saved;
     }
   }
 
@@ -415,6 +447,8 @@ class Gen {
     const binds = bindsOf(g);
     for (const b of binds) if (this.isGenericBinding(b)) this.genericBinders.add(b.name.id);
     if (g._tag === "Rec") {
+      const deep = this.deepGroup(binds, indent, exported);
+      if (deep !== undefined) return deep;
       const merged = this.mergedLoop(binds, indent, exported);
       if (merged !== undefined) return merged;
     }
@@ -425,7 +459,7 @@ class Gen {
     const scheme = this.tp.schemes.get(b.name.id);
     if (scheme === undefined)
       throw new CodegenError(`internal: no scheme for '${b.name.text}'`, b.span);
-    const name = this.name(b.name);
+    const name = this.defNames.get(b.name.id) ?? this.name(b.name);
     const prefix = `${indent}${exported ? "export " : ""}const ${name}`;
     const type = prune(scheme.type);
     const generic = this.genericBinders.has(b.name.id);
@@ -433,21 +467,24 @@ class Gen {
     return this.withTypeVars(scheme.vars, !generic, (params) => {
       const tparams = generic && params.length > 0 ? `<${params.join(", ")}>` : "";
       if (isFun(type) && (b.expr._tag === "Lam" || generic)) {
-        const [paramType, resultType] = type.args;
-        let fn: string;
-        const loop = this.tailLoop(b, tparams, indent);
-        if (loop !== undefined) {
-          fn = loop;
-        } else if (b.expr._tag === "Lam") {
-          const param = this.name(b.expr.param);
-          const body = this.lamBody(b.expr.body, indent);
-          fn = `${tparams}(${param}: ${this.ts(paramType)}): ${this.tsReturn(resultType)} => ${body}`;
-        } else {
-          // Eta-expand so that the binding can carry type parameters.
-          const x = this.fresh("x");
-          fn = `${tparams}(${x}: ${this.ts(paramType)}): ${this.tsReturn(resultType)} => ${paren(this.expr(b.expr, indent))}(${x})`;
-        }
-        return [`${prefix} = ${fn};`];
+        // The function's body is a nested function: no `yield` to an enclosing generator.
+        return this.shallow(() => {
+          const [paramType, resultType] = type.args;
+          let fn: string;
+          const loop = this.tailLoop(b, tparams, indent);
+          if (loop !== undefined) {
+            fn = loop;
+          } else if (b.expr._tag === "Lam") {
+            const param = this.name(b.expr.param);
+            const body = this.lamBody(b.expr.body, indent);
+            fn = `${tparams}(${param}: ${this.ts(paramType)}): ${this.tsReturn(resultType)} => ${body}`;
+          } else {
+            // Eta-expand so that the binding can carry type parameters.
+            const x = this.fresh("x");
+            fn = `${tparams}(${x}: ${this.ts(paramType)}): ${this.tsReturn(resultType)} => ${paren(this.expr(b.expr, indent))}(${x})`;
+          }
+          return [`${prefix} = ${fn};`];
+        });
       }
       const t = this.ts(type);
       // Top-level IO actions are built when they run, so that errors happen in order.
@@ -468,52 +505,244 @@ class Gen {
    * Returns `undefined` if `b` has no such tail calls.
    */
   private tailLoop(b: Bind, typeArgs: string, indent: string): string | undefined {
+    const fn = this.fn(b);
+    if (fn === undefined) return undefined;
+    const inner = `${indent}  `;
+    const loop = this.loopStatements(fn, typeArgs, inner);
+    if (loop === undefined) return undefined;
+    const t = prune(fn.scheme.type);
+    const arrows = loop.inputs.map((input, i) => {
+      const head = `(${input}: ${loop.types[i] ?? "unknown"})`;
+      return i === 0 && isFun(t)
+        ? `${typeArgs}${head}: ${this.tsReturn(t.args[1])} =>`
+        : `${head} =>`;
+    });
+    return [`${arrows.join(" ")} {`, ...loop.lines, `${indent}}`].join("\n");
+  }
+
+  /** `b` as a function: its parameters (at least one) and body. */
+  private fn(b: Bind): Fn | undefined {
     const params: Array<Name> = [];
     let body = b.expr;
     while (body._tag === "Lam") {
       params.push(body.param);
       body = body.body;
     }
-    if (params.length === 0) return undefined;
-    const target = (state: ReadonlyArray<string>): LoopTarget => ({
-      arity: params.length,
-      typeArgs,
-      jump: (args, ind) => args.map((a, i) => `${ind}${state[i] ?? ""} = ${a};`),
-    });
-    if (!this.hasTailCall(body, { targets: new Map([[b.name.id, target([])]]) })) return undefined;
-
     const scheme = this.tp.schemes.get(b.name.id);
-    const resultType =
-      scheme !== undefined && isFun(prune(scheme.type)) ? prune(scheme.type) : undefined;
-    const names = params.map((p) => this.name(p));
-    const types = params.map((p) => {
+    return params.length === 0 || scheme === undefined ? undefined : { b, params, body, scheme };
+  }
+
+  private paramTypes(fn: Fn): Array<string> {
+    return fn.params.map((p) => {
       const t = this.tp.varTypes.get(p.id);
       return t === undefined ? "unknown" : this.ts(t);
     });
+  }
+
+  /** The type `fn` returns when applied to all its parameters. */
+  private resultType(fn: Fn): Type | undefined {
+    let t: Type | undefined = prune(fn.scheme.type);
+    for (let i = 0; i < fn.params.length; i++)
+      t = t !== undefined && isFun(t) ? prune(t.args[1]) : undefined;
+    return t;
+  }
+
+  /**
+   * The body of `fn` as a loop whose iterations are its self tail calls, given its parameters
+   * as `inputs`; `undefined` if it has no self tail calls.
+   */
+  private loopStatements(
+    fn: Fn,
+    typeArgs: string,
+    indent: string,
+  ): { inputs: Array<string>; types: Array<string>; lines: Array<string> } | undefined {
+    const target = (state: ReadonlyArray<string>): LoopTarget => ({
+      arity: fn.params.length,
+      typeArgs,
+      jump: (args, ind) => args.map((a, i) => `${ind}${state[i] ?? ""} = ${a};`),
+    });
+    if (!this.hasTailCall(fn.body, { targets: new Map([[fn.b.name.id, target([])]]) }))
+      return undefined;
+    const names = fn.params.map((p) => this.name(p));
+    const types = this.paramTypes(fn);
     const inputs = names.map((n) => this.fresh(`${n}$in`));
     const state = names.map((n) => this.fresh(`${n}$s`));
-    const loop: Loop = { targets: new Map([[b.name.id, target(state)]]) };
-
-    const arrows = inputs.map((input, i) => {
-      const head = `(${input}: ${types[i] ?? "unknown"})`;
-      if (i === 0 && resultType !== undefined && isFun(resultType)) {
-        return `${typeArgs}${head}: ${this.tsReturn(resultType.args[1])} =>`;
-      }
-      return `${head} =>`;
-    });
-    const inner = `${indent}  `;
+    const loop: Loop = { targets: new Map([[fn.b.name.id, target(state)]]) };
     const lines = [
-      `${arrows.join(" ")} {`,
       ...state.map(
-        (s, i) => `${inner}let ${s}: ${types[i] ?? "unknown"} = ${inputs[i] ?? "undefined"};`,
+        (s, i) => `${indent}let ${s}: ${types[i] ?? "unknown"} = ${inputs[i] ?? "undefined"};`,
       ),
-      `${inner}for (;;) {`,
-      ...names.map((n, i) => `${inner}  const ${n} = ${state[i] ?? "undefined"};`),
-      ...this.statements(body, `${inner}  `, { gen: false, loop }),
-      `${inner}}`,
+      `${indent}for (;;) {`,
+      ...names.map((n, i) => `${indent}  const ${n} = ${state[i] ?? "undefined"};`),
+      ...this.statements(fn.body, `${indent}  `, { gen: false, loop }),
       `${indent}}`,
     ];
-    return lines.join("\n");
+    return { inputs, types, lines };
+  }
+
+  // ---- deep recursion -------------------------------------------------------------------------
+
+  /**
+   * A recursive group with non-tail calls to itself, made stack-safe. Each function `f`
+   * becomes three:
+   *
+   * - `f$direct`, the usual code (with its tail-call loops), whose recursive calls go to `f`;
+   * - `f$deep`, a generator version taking all arguments at once, whose calls to the group
+   *   are yielded to `rt.trampoline` and so keep their stack on the heap;
+   * - `f`, which counts the group's calls in progress in `rt.stack.depth` and runs
+   *   `f$direct`, or, at `rt.maxDepth`, `f$deep` on a trampoline.
+   *
+   * Shallow recursion thus stays as fast as before. Returns `undefined` if no member calls
+   * the group outside tail position (calls inside lambdas and `do` blocks do not count).
+   */
+  private deepGroup(
+    binds: ReadonlyArray<Bind>,
+    indent: string,
+    exported: boolean,
+  ): Array<string> | undefined {
+    const fns = binds.flatMap((b) => this.fn(b) ?? []);
+    const arities = new Map(fns.map((f) => [f.b.name.id, f.params.length]));
+    if (!fns.some((f) => this.callsDeep(f.body, arities, true))) return undefined;
+
+    const deep: Deep = {
+      targets: new Map(
+        fns.map((f) => [
+          f.b.name.id,
+          { arity: f.params.length, gen: this.fresh(`${this.name(f.b.name)}$deep`) },
+        ]),
+      ),
+    };
+    const direct = new Map(
+      fns.map((f) => [f.b.name.id, this.fresh(`${this.name(f.b.name)}$direct`)]),
+    );
+    const out: Array<string> = [];
+    for (const f of fns) out.push(...this.deepGenerator(f, deep, indent));
+    for (const f of fns) out.push(...this.deepEntry(f, deep, direct, indent, exported));
+    for (const [id, name] of direct) this.defNames.set(id, name);
+    try {
+      const merged = this.mergedLoop(binds, indent, false);
+      out.push(
+        ...(merged ??
+          binds.flatMap((b) => this.binding(b, indent, exported && !direct.has(b.name.id)))),
+      );
+    } finally {
+      for (const id of direct.keys()) this.defNames.delete(id);
+    }
+    return out;
+  }
+
+  /** Whether `e` calls one of `fns` (saturated) outside tail position, lambdas and IO. */
+  private callsDeep(e: CExpr, fns: ReadonlyMap<number, number>, tail: boolean): boolean {
+    if (this.isIOChain(e)) return false;
+    const inGroup = (g: BindGroup): boolean =>
+      bindsOf(g).some((b) => b.expr._tag !== "Lam" && this.callsDeep(b.expr, fns, false));
+    const inBody = (g: GuardedBody): boolean => {
+      switch (g._tag) {
+        case "Body":
+          return this.callsDeep(g.expr, fns, tail);
+        case "LetBody":
+          return inGroup(g.group) || inBody(g.body);
+        case "Guards":
+          return g.guards.some(
+            (x) => this.callsDeep(x.cond, fns, false) || this.callsDeep(x.expr, fns, tail),
+          );
+      }
+    };
+    switch (e._tag) {
+      case "Typed":
+        return this.callsDeep(e.expr, fns, tail);
+      case "If":
+        return (
+          this.callsDeep(e.cond, fns, false) ||
+          this.callsDeep(e.thenBranch, fns, tail) ||
+          this.callsDeep(e.elseBranch, fns, tail)
+        );
+      case "Let":
+        return inGroup(e.group) || this.callsDeep(e.body, fns, tail);
+      case "Match":
+        return e.clauses.some((c) => inBody(c.body));
+      case "App": {
+        const args: Array<CExpr> = [];
+        let head: CExpr = e;
+        while (head._tag === "App") {
+          args.push(head.arg);
+          head = head.fn;
+        }
+        if (!tail && head._tag === "Var" && fns.get(head.name.id) === args.length) return true;
+        return (
+          args.some((a) => this.callsDeep(a, fns, false)) ||
+          (head._tag !== "Var" && this.callsDeep(head, fns, false))
+        );
+      }
+      default:
+        return false;
+    }
+  }
+
+  /** `f$deep`: `fn` as a generator, with all its parameters at once. */
+  private deepGenerator(fn: Fn, deep: Deep, indent: string): Array<string> {
+    const id = fn.b.name.id;
+    const gen = deep.targets.get(id)?.gen ?? "";
+    const generic = this.genericBinders.has(id);
+    return this.withTypeVars(fn.scheme.vars, !generic, (params) => {
+      const tparams = generic && params.length > 0 ? `<${params.join(", ")}>` : "";
+      const result = this.resultType(fn);
+      const head = (names: ReadonlyArray<string>, types: ReadonlyArray<string>): string =>
+        `${indent}const ${gen} = function* ${tparams}(${names.map((n, i) => `${n}: ${types[i] ?? "unknown"}`).join(", ")}): rt.Deep<${result === undefined ? "unknown" : this.ts(result)}> {`;
+      const saved = this.deep;
+      this.deep = deep;
+      try {
+        const inner = `${indent}  `;
+        const loop = this.loopStatements(fn, tparams, inner);
+        if (loop !== undefined)
+          return [head(loop.inputs, loop.types), ...loop.lines, `${indent}};`];
+        return [
+          head(
+            fn.params.map((p) => this.name(p)),
+            this.paramTypes(fn),
+          ),
+          ...this.statements(fn.body, inner, PURE),
+          `${indent}};`,
+        ];
+      } finally {
+        this.deep = saved;
+      }
+    });
+  }
+
+  /** `f`: runs `f$direct`, or `f$deep` on a trampoline when the recursion is deep. */
+  private deepEntry(
+    fn: Fn,
+    deep: Deep,
+    direct: ReadonlyMap<number, string>,
+    indent: string,
+    exported: boolean,
+  ): Array<string> {
+    const id = fn.b.name.id;
+    const generic = this.genericBinders.has(id);
+    return this.withTypeVars(fn.scheme.vars, !generic, (params) => {
+      const tparams = generic && params.length > 0 ? `<${params.join(", ")}>` : "";
+      const t = prune(fn.scheme.type);
+      const types = this.paramTypes(fn);
+      const inputs = fn.params.map((p) => this.fresh(`${this.name(p)}$in`));
+      const arrows = inputs.map((input, i) => {
+        const h = `(${input}: ${types[i] ?? "unknown"})`;
+        return i === 0 && isFun(t) ? `${tparams}${h}: ${this.tsReturn(t.args[1])} =>` : `${h} =>`;
+      });
+      const i1 = `${indent}  `;
+      const gen = deep.targets.get(id)?.gen ?? "";
+      return [
+        `${indent}${exported ? "export " : ""}const ${this.name(fn.b.name)} = ${arrows.join(" ")} {`,
+        `${i1}if (rt.stack.depth >= rt.maxDepth) return rt.trampoline(${gen}${tparams}(${inputs.join(", ")}));`,
+        `${i1}rt.stack.depth++;`,
+        `${i1}try {`,
+        `${i1}  return ${direct.get(id) ?? ""}${tparams}${inputs.map((x) => `(${x})`).join("")};`,
+        `${i1}} finally {`,
+        `${i1}  rt.stack.depth--;`,
+        `${i1}}`,
+        `${indent}};`,
+      ];
+    });
   }
 
   /**
@@ -590,7 +819,7 @@ class Gen {
         if (name !== undefined) this.typeNames.set(id, name);
       }
       try {
-        return this.emitMergedLoop(members, params, generic, indent, exported);
+        return this.shallow(() => this.emitMergedLoop(members, params, generic, indent, exported));
       } finally {
         for (const id of groupVars.keys())
           if (!reps.some((r) => r.id === id)) this.typeNames.delete(id);
@@ -688,7 +917,7 @@ class Gen {
       });
       const start = `${loopName}${loopArgs}({ fn: ${k}, a: [${inputs.join(", ")}] })`;
       out.push(
-        `${indent}${exported ? "export " : ""}const ${this.name(m.b.name)} = ${arrows.join(" ")} ${start};`,
+        `${indent}${exported ? "export " : ""}const ${this.defNames.get(m.b.name.id) ?? this.name(m.b.name)} = ${arrows.join(" ")} ${start};`,
       );
     });
     return out;
@@ -798,6 +1027,10 @@ class Gen {
 
   /** The body of an arrow function: an expression, or a block. */
   private lamBody(e: CExpr, indent: string): string {
+    return this.shallow(() => this.lamBodyCode(e, indent));
+  }
+
+  private lamBodyCode(e: CExpr, indent: string): string {
     if (!this.needsStatements(e)) {
       const c = this.expr(e, indent);
       // An object literal body would need parentheses; constructors never produce one here.
@@ -905,7 +1138,7 @@ class Gen {
 
   private gen(e: CExpr, indent: string): Code {
     this.usesEffect = true;
-    const body = this.statements(e, `${indent}  `, GEN).join("\n");
+    const body = this.shallow(() => this.statements(e, `${indent}  `, GEN).join("\n"));
     return atom(`${this.effect}.gen(function* () {\n${body}\n${indent}})`);
   }
 
@@ -952,7 +1185,8 @@ class Gen {
 
     const out: Array<string> = [];
     const joins = new Map<number, { fn: string; params: ReadonlyArray<Binding> }>();
-    if (!mode.gen && mode.loop === undefined) {
+    // Not in generator versions either: their bodies `yield`.
+    if (!mode.gen && mode.loop === undefined && this.deep === undefined) {
       const result = this.ts(this.typeOf(m));
       for (const [clause, { count, bindings }] of leaves) {
         const c = m.clauses[clause];
@@ -1124,6 +1358,13 @@ class Gen {
   // ---- expressions ----------------------------------------------------------------------------
 
   private iife(e: CExpr, indent: string): Code {
+    if (this.deep !== undefined) {
+      // Inside a generator version: a generator, so that the statements can `yield`.
+      const t = this.ts(this.typeOf(e));
+      return atom(
+        `(yield* (function* (): rt.Deep<${t}> {\n${this.returns(e, `${indent}  `).join("\n")}\n${indent}})())`,
+      );
+    }
     return atom(`(() => {\n${this.returns(e, `${indent}  `).join("\n")}\n${indent}})()`);
   }
 
@@ -1221,6 +1462,12 @@ class Gen {
       const targs = this.genericBinders.has(head.name.id)
         ? this.typeArgs(this.tp.schemes.get(head.name.id), this.tp.exprTypes.get(head))
         : "";
+      const deep = this.deep?.targets.get(head.name.id);
+      if (deep !== undefined && deep.arity === args.length) {
+        // A call within the group, from its generator version: run by the trampoline.
+        const all = args.map((_, i) => arg(i)).join(", ");
+        return atom(`((yield ${deep.gen}${targs}(${all})) as ${this.ts(this.typeOf(e))})`);
+      }
       return call(this.name(head.name) + targs, 0);
     }
 
@@ -1271,7 +1518,9 @@ class Gen {
         return n === 2 ? atom(`rt.appendList(${arg(0)}, ${arg(1)})`) : undefined;
       case ">>":
         // The second action is built only after the first has run.
-        return n === 2 ? atom(`rt.then_(${arg(0)}, () => ${arg(1)})`) : undefined;
+        return n === 2
+          ? atom(`rt.then_(${arg(0)}, () => ${this.shallow(() => arg(1))})`)
+          : undefined;
       case "show":
       case "print": {
         const t = firstParam();
@@ -1325,7 +1574,8 @@ class Gen {
       ft = ft !== undefined && isFun(ft) ? prune(ft.args[1]) : undefined;
     }
     const names = params.map((_, i) => this.fresh(`t${i}`));
-    const given = Array.from({ length: n }, (_, i) => arg(i));
+    // The given arguments are evaluated inside the lambda.
+    const given = this.shallow(() => Array.from({ length: n }, (_, i) => arg(i)));
     const rest = names.slice(n);
     const lambda = rest.map((x, i) => `(${x}: ${params[n + i] ?? "unknown"}) =>`).join(" ");
     return low(`${lambda} [${[...given, ...rest].join(", ")}] as const`);
