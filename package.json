@@ -1,6 +1,6 @@
 {
   "name": "haskell-to-effect",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A compiler from a small subset of Haskell to typed TypeScript on Effect.",
   "license": "MIT",
   "bin": {
@@ -23,6 +23,7 @@
     "dev": "vp pack --watch",
     "test": "vp test",
     "check": "vp check",
+    "hs": "vpx src/cli.ts run",
     "prepublishOnly": "vp run build",
     "prepare": "vp config && effect-tsgo patch --typescript --oxlint"
   },

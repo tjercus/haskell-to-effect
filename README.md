@@ -72,7 +72,12 @@ node dist/cli.mjs compile Main.hs -o out  # write out/Main.ts, out/hs-runtime.ts
 node dist/cli.mjs run     Main.hs         # compile and run
 ```
 
-During development, run the CLI from source with `vpx src/cli.ts <command> …`.
+During development, run the CLI from source with `vpx src/cli.ts <command> …`, or compile
+and run a program from source with the `hs` script:
+
+```sh
+vp run hs tests/golden/programs/echo.hs
+```
 
 `compile` writes three files: the module, a copy of the runtime, and `run.ts`, which runs
 `main`. Run it with `node out/run.ts`. The output needs the `effect` package to be

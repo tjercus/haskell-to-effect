@@ -125,7 +125,7 @@ const hs2effect = Command.make("hs2effect").pipe(
   Command.withSubcommands([check, compileCommand, run]),
 );
 
-Command.run(hs2effect, { version: "0.0.0" }).pipe(
+Command.run(hs2effect, { version: "0.1.0" }).pipe(
   Effect.provide(NodeServices.layer),
   NodeRuntime.runMain,
 );

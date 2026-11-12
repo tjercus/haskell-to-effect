@@ -33,7 +33,7 @@
 
           haskell-to-effect = pkgs.stdenv.mkDerivation (finalAttrs: {
             pname = "haskell-to-effect";
-            version = "0.0.0";
+            version = "0.1.0";
 
             src = lib.fileset.toSource {
               root = ./.;
