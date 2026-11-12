@@ -1,4 +1,4 @@
-import { defineConfig } from "vite-plus";
+import { defaultExclude, defineConfig } from "vite-plus";
 
 export default defineConfig({
   staged: {
@@ -18,6 +18,10 @@ export default defineConfig({
       generator: "tsgo",
     },
     exports: true,
+  },
+  test: {
+    // docs/repos holds reference clones (e.g. Effect's source) with their own test suites.
+    exclude: [...defaultExclude, "docs/repos/**"],
   },
   lint: {
     rules: {
