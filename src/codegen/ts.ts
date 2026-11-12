@@ -72,17 +72,21 @@ const unsupportedPrims = new Map<string, string>();
 
 type Code = { readonly code: string; readonly atomic: boolean };
 
-/**
- * A self-recursive function whose tail calls become loop iterations: a saturated call to
- * `id` with `arity` arguments (at the function's own type) assigns them to `state` and
- * continues the loop.
- */
-interface Loop {
-  readonly id: number;
+/** A function whose saturated tail calls are loop iterations. */
+interface LoopTarget {
   readonly arity: number;
   /** Explicit type arguments the call must have to be a loop iteration. */
   readonly typeArgs: string;
-  readonly state: ReadonlyArray<string>;
+  /** Statements that set up the next iteration, given the (already computed) arguments. */
+  readonly jump: (args: ReadonlyArray<string>, indent: string) => Array<string>;
+}
+
+/**
+ * A loop that tail calls jump into, by `Name.id` of the callee: one function calling
+ * itself, or a group of mutually recursive functions merged into one loop.
+ */
+interface Loop {
+  readonly targets: ReadonlyMap<number, LoopTarget>;
 }
 
 /** How statements are emitted: inside an `Effect.gen` body, and/or inside a tail-call loop. */
@@ -242,7 +246,18 @@ class Gen {
   /** Explicit type arguments for a reference to something with `scheme`, used at type `at`. */
   private typeArgs(scheme: Scheme | undefined, at: Type | undefined): string {
     if (scheme === undefined || scheme.vars.length === 0 || at === undefined) return "";
+    const subst = this.instantiation(scheme, at);
+    const args = scheme.vars.map((v) => {
+      const t = subst.get(v.id);
+      return t === undefined ? "unknown" : this.ts(t);
+    });
+    return `<${args.join(", ")}>`;
+  }
+
+  /** The types that `scheme`'s variables take when it is used at type `at`. */
+  private instantiation(scheme: Scheme | undefined, at: Type | undefined): Map<number, Type> {
     const subst = new Map<number, Type>();
+    if (scheme === undefined || at === undefined) return subst;
     const match = (s: Type, t: Type): void => {
       const ps = prune(s);
       const pt = prune(t);
@@ -256,11 +271,7 @@ class Gen {
       }
     };
     match(scheme.type, zonk(at));
-    const args = scheme.vars.map((v) => {
-      const t = subst.get(v.id);
-      return t === undefined ? "unknown" : this.ts(t);
-    });
-    return `<${args.join(", ")}>`;
+    return subst;
   }
 
   /** A type in return-annotation position, where function types need parentheses. */
@@ -403,6 +414,10 @@ class Gen {
   private group(g: BindGroup, indent: string, exported: boolean): Array<string> {
     const binds = bindsOf(g);
     for (const b of binds) if (this.isGenericBinding(b)) this.genericBinders.add(b.name.id);
+    if (g._tag === "Rec") {
+      const merged = this.mergedLoop(binds, indent, exported);
+      if (merged !== undefined) return merged;
+    }
     return binds.flatMap((b) => this.binding(b, indent, exported));
   }
 
@@ -460,8 +475,12 @@ class Gen {
       body = body.body;
     }
     if (params.length === 0) return undefined;
-    const probe: Loop = { id: b.name.id, arity: params.length, typeArgs, state: [] };
-    if (!this.hasTailCall(body, probe)) return undefined;
+    const target = (state: ReadonlyArray<string>): LoopTarget => ({
+      arity: params.length,
+      typeArgs,
+      jump: (args, ind) => args.map((a, i) => `${ind}${state[i] ?? ""} = ${a};`),
+    });
+    if (!this.hasTailCall(body, { targets: new Map([[b.name.id, target([])]]) })) return undefined;
 
     const scheme = this.tp.schemes.get(b.name.id);
     const resultType =
@@ -473,7 +492,7 @@ class Gen {
     });
     const inputs = names.map((n) => this.fresh(`${n}$in`));
     const state = names.map((n) => this.fresh(`${n}$s`));
-    const loop: Loop = { ...probe, state };
+    const loop: Loop = { targets: new Map([[b.name.id, target(state)]]) };
 
     const arrows = inputs.map((input, i) => {
       const head = `(${input}: ${types[i] ?? "unknown"})`;
@@ -497,21 +516,244 @@ class Gen {
     return lines.join("\n");
   }
 
-  /** The arguments of `e` if it is a call that can be a loop iteration of `loop`. */
-  private selfCall(e: CExpr, loop: Loop): Array<CExpr> | undefined {
+  /**
+   * Mutually recursive functions that tail-call each other, merged into one loop. The loop
+   * takes a tagged call `{ fn: k, a: [args] }` and switches on `fn`; a tail call to any member
+   * sets the next call and continues. Each member becomes an entry point that starts the
+   * loop, so non-tail calls and partial applications work as before (and re-enter the loop
+   * with fresh state).
+   *
+   * The loop's type parameters are the members' type variables, identified with each other
+   * through the tail calls: when `f` tail-calls `g` with `g`'s variable `b` instantiated to
+   * `f`'s variable `a`, then `a` and `b` are one loop parameter. (Without signatures the
+   * group is generalised together and already shares its variables.) Calls at any other
+   * type stay ordinary calls.
+   *
+   * Returns `undefined` if the group does not qualify (a member is not a function, the result
+   * types differ, or a member's own variables would be identified) or has no tail calls
+   * between different members; its functions are then emitted one by one.
+   */
+  private mergedLoop(
+    binds: ReadonlyArray<Bind>,
+    indent: string,
+    exported: boolean,
+  ): Array<string> | undefined {
+    const members = binds.map((b) => {
+      const params: Array<Name> = [];
+      let body = b.expr;
+      while (body._tag === "Lam") {
+        params.push(body.param);
+        body = body.body;
+      }
+      const scheme = this.tp.schemes.get(b.name.id);
+      return { b, params, body, vars: scheme?.vars ?? [], scheme };
+    });
+    if (members.length < 2 || members.some((m) => m.params.length === 0 || m.scheme === undefined))
+      return undefined;
+    const byId = new Map(members.map((m) => [m.b.name.id, m]));
+
+    // Identify type variables through the tail calls between members (union-find).
+    const groupVars = new Map(members.flatMap((m) => m.vars.map((v): [number, TVar] => [v.id, v])));
+    const parent = new Map([...groupVars.keys()].map((id) => [id, id]));
+    const find = (id: number): number => {
+      let r = id;
+      while (parent.get(r) !== r) r = parent.get(r) ?? r;
+      return r;
+    };
+    let crossCalls = false;
+    for (const m of members) {
+      for (const call of this.tailCallsTo(m.body, byId)) {
+        if (call.callee !== m.b.name.id) crossCalls = true;
+        const callee = byId.get(call.callee);
+        const subst = this.instantiation(callee?.scheme, call.at);
+        for (const v of callee?.vars ?? []) {
+          const t = subst.get(v.id);
+          if (t?._tag === "TVar" && groupVars.has(t.id)) parent.set(find(v.id), find(t.id));
+        }
+      }
+    }
+    if (!crossCalls) return undefined;
+    for (const m of members) {
+      const classes = new Set(m.vars.map((v) => find(v.id)));
+      if (classes.size !== m.vars.length) return undefined;
+    }
+    const reps = [...new Set([...groupVars.keys()].map(find))].flatMap((id) => {
+      const v = groupVars.get(id);
+      return v === undefined ? [] : [v];
+    });
+    const generic = members.some((m) => this.genericBinders.has(m.b.name.id));
+
+    return this.withTypeVars(reps, !generic, (params) => {
+      // Every member's variables are named after their class.
+      for (const id of groupVars.keys()) {
+        const name = this.typeNames.get(find(id));
+        if (name !== undefined) this.typeNames.set(id, name);
+      }
+      try {
+        return this.emitMergedLoop(members, params, generic, indent, exported);
+      } finally {
+        for (const id of groupVars.keys())
+          if (!reps.some((r) => r.id === id)) this.typeNames.delete(id);
+      }
+    });
+  }
+
+  private emitMergedLoop(
+    members: ReadonlyArray<{
+      b: Bind;
+      params: ReadonlyArray<Name>;
+      body: CExpr;
+      vars: ReadonlyArray<TVar>;
+      scheme: Scheme | undefined;
+    }>,
+    params: ReadonlyArray<string>,
+    generic: boolean,
+    indent: string,
+    exported: boolean,
+  ): Array<string> | undefined {
+    const tparams = generic && params.length > 0 ? `<${params.join(", ")}>` : "";
+    const resultOf = (m: (typeof members)[number]): Type | undefined => {
+      let t: Type | undefined = m.scheme === undefined ? undefined : prune(m.scheme.type);
+      for (let i = 0; i < m.params.length; i++)
+        t = t !== undefined && isFun(t) ? prune(t.args[1]) : undefined;
+      return t;
+    };
+    const resultTypes = new Set(
+      members.map((m) => {
+        const t = resultOf(m);
+        return t === undefined ? "?" : this.ts(t);
+      }),
+    );
+    const [result] = [...resultTypes];
+    if (resultTypes.size !== 1 || result === undefined || result === "?") return undefined;
+
+    const callVar = this.fresh("call");
+    const ownTypeArgs = (m: (typeof members)[number]): string =>
+      this.genericBinders.has(m.b.name.id)
+        ? `<${m.vars.map((v) => this.typeNames.get(v.id) ?? "unknown").join(", ")}>`
+        : "";
+    const loop: Loop = {
+      targets: new Map<number, LoopTarget>(
+        members.map((m, k) => [
+          m.b.name.id,
+          {
+            arity: m.params.length,
+            typeArgs: ownTypeArgs(m),
+            jump: (args, ind) => [`${ind}${callVar} = { fn: ${k}, a: [${args.join(", ")}] };`],
+          },
+        ]),
+      ),
+    };
+    const typesOf = (m: (typeof members)[number]): Array<string> =>
+      m.params.map((p) => {
+        const t = this.tp.varTypes.get(p.id);
+        return t === undefined ? "unknown" : this.ts(t);
+      });
+    const callType = members
+      .map((m, k) => `{ readonly fn: ${k}; readonly a: readonly [${typesOf(m).join(", ")}] }`)
+      .join(" | ");
+    const loopName = this.fresh(`${members.map((m) => this.name(m.b.name)).join("$")}$loop`);
+    const i1 = `${indent}  `;
+    const i2 = `${i1}  `;
+    const i3 = `${i2}  `;
+    const i4 = `${i3}  `;
+    const out = [
+      `${indent}const ${loopName} = ${tparams}(${callVar}: ${callType}): ${result} => {`,
+      `${i1}for (;;) {`,
+      `${i2}switch (${callVar}.fn) {`,
+    ];
+    members.forEach((m, k) => {
+      // The last case is `default`, so TypeScript sees that every path returns.
+      out.push(`${i3}${k === members.length - 1 ? "default" : `case ${k}`}: {`);
+      out.push(`${i4}const [${m.params.map((p) => this.name(p)).join(", ")}] = ${callVar}.a;`);
+      out.push(...this.statements(m.body, i4, { gen: false, loop }), `${i3}}`);
+    });
+    out.push(`${i2}}`, `${i1}}`, `${indent}};`);
+
+    // Entry points, with the members' own names and curried signatures. Loop parameters that
+    // a member does not mention cannot be reached from it, so `never` stands in for them.
+    members.forEach((m, k) => {
+      const own = new Set(m.vars.map((v) => this.typeNames.get(v.id)));
+      const entryParams = generic ? m.vars.map((v) => this.typeNames.get(v.id) ?? "unknown") : [];
+      const entryTparams = entryParams.length > 0 ? `<${entryParams.join(", ")}>` : "";
+      const loopArgs =
+        tparams === "" ? "" : `<${params.map((p) => (own.has(p) ? p : "never")).join(", ")}>`;
+      const types = typesOf(m);
+      const inputs = m.params.map((p) => this.fresh(`${this.name(p)}$in`));
+      const arrows = inputs.map((input, i) => {
+        const head = `(${input}: ${types[i] ?? "unknown"})`;
+        if (i > 0) return `${head} =>`;
+        const t = m.scheme === undefined ? undefined : prune(m.scheme.type);
+        return `${entryTparams}${head}: ${t !== undefined && isFun(t) ? this.tsReturn(t.args[1]) : result} =>`;
+      });
+      const start = `${loopName}${loopArgs}({ fn: ${k}, a: [${inputs.join(", ")}] })`;
+      out.push(
+        `${indent}${exported ? "export " : ""}const ${this.name(m.b.name)} = ${arrows.join(" ")} ${start};`,
+      );
+    });
+    return out;
+  }
+
+  /** Saturated calls in tail position to the given functions (ignoring their types). */
+  private tailCallsTo(
+    e: CExpr,
+    fns: ReadonlyMap<number, { readonly params: ReadonlyArray<Name> }>,
+  ): Array<{ readonly callee: number; readonly at: Type | undefined }> {
+    if (this.isIOChain(e)) return [];
+    const inBody = (
+      g: GuardedBody,
+    ): Array<{ readonly callee: number; readonly at: Type | undefined }> => {
+      switch (g._tag) {
+        case "Body":
+          return this.tailCallsTo(g.expr, fns);
+        case "LetBody":
+          return inBody(g.body);
+        case "Guards":
+          return g.guards.flatMap((x) => this.tailCallsTo(x.expr, fns));
+      }
+    };
+    switch (e._tag) {
+      case "Let":
+        return this.tailCallsTo(e.body, fns);
+      case "If":
+        return [...this.tailCallsTo(e.thenBranch, fns), ...this.tailCallsTo(e.elseBranch, fns)];
+      case "Match":
+        return e.clauses.flatMap((c) => inBody(c.body));
+      case "Typed":
+        return this.tailCallsTo(e.expr, fns);
+      case "App": {
+        let head: CExpr = e;
+        let n = 0;
+        while (head._tag === "App") {
+          head = head.fn;
+          n++;
+        }
+        if (head._tag !== "Var") return [];
+        const fn = fns.get(head.name.id);
+        if (fn === undefined || fn.params.length !== n) return [];
+        return [{ callee: head.name.id, at: this.tp.exprTypes.get(head) }];
+      }
+      default:
+        return [];
+    }
+  }
+
+  /** `e` as a jump into `loop`: a saturated call to one of its targets at the right type. */
+  private loopCall(e: CExpr, loop: Loop): { target: LoopTarget; args: Array<CExpr> } | undefined {
     const args: Array<CExpr> = [];
     let head = e;
     while (head._tag === "App") {
       args.unshift(head.arg);
       head = head.fn;
     }
-    if (head._tag !== "Var" || head.name.id !== loop.id || args.length !== loop.arity)
-      return undefined;
+    if (head._tag !== "Var") return undefined;
+    const target = loop.targets.get(head.name.id);
+    if (target === undefined || args.length !== target.arity) return undefined;
     // A call at another type (polymorphic recursion) cannot reuse the loop's state.
-    const targs = this.genericBinders.has(loop.id)
-      ? this.typeArgs(this.tp.schemes.get(loop.id), this.tp.exprTypes.get(head))
+    const targs = this.genericBinders.has(head.name.id)
+      ? this.typeArgs(this.tp.schemes.get(head.name.id), this.tp.exprTypes.get(head))
       : "";
-    return targs === loop.typeArgs ? args : undefined;
+    return targs === target.typeArgs ? { target, args } : undefined;
   }
 
   /** Whether `e` has a self call in tail position (outside `Effect.gen`, which is stack-safe). */
@@ -537,7 +779,7 @@ class Gen {
       case "Typed":
         return this.hasTailCall(e.expr, loop);
       case "App":
-        return this.selfCall(e, loop) !== undefined;
+        return this.loopCall(e, loop) !== undefined;
       default:
         return false;
     }
@@ -594,15 +836,12 @@ class Gen {
       }
     }
     if (mode.loop !== undefined) {
-      const loop = mode.loop;
-      const args = this.selfCall(e, loop);
-      if (args !== undefined) {
-        // The arguments only refer to this iteration's constants, so assigning the state one
-        // by one is safe.
-        return [
-          ...args.map((a, i) => `${indent}${loop.state[i] ?? ""} = ${this.expr(a, indent).code};`),
-          `${indent}continue;`,
-        ];
+      const call = this.loopCall(e, mode.loop);
+      if (call !== undefined) {
+        // The arguments only refer to this iteration's constants, so setting up the next
+        // iteration one assignment at a time is safe.
+        const args = call.args.map((a) => this.expr(a, indent).code);
+        return [...call.target.jump(args, indent), `${indent}continue;`];
       }
     }
     switch (e._tag) {

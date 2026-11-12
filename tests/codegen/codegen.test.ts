@@ -113,3 +113,47 @@ describe("tail calls", () => {
     expect(c).not.toContain("for (;;)");
   });
 });
+
+describe("mutual recursion", () => {
+  test("tail calls between functions are merged into one loop", () => {
+    const c = code(
+      "isEven 0 = True",
+      "isEven n = isOdd (n - 1)",
+      "isOdd 0 = False",
+      "isOdd n = isEven (n - 1)",
+      "main = print (isEven 4)",
+    );
+    expect(c).toContain(
+      "const isEven$isOdd$loop = (call: { readonly fn: 0; readonly a: readonly [number] }",
+    );
+    expect(c).toContain("call = { fn: 1, a: [(n - 1)] };");
+    expect(c).toContain(
+      "export const isEven = (arg$in: number): boolean => isEven$isOdd$loop({ fn: 0, a: [arg$in] });",
+    );
+  });
+
+  test("type variables from separate signatures are identified through the tail calls", () => {
+    const c = code(
+      "keep :: [a] -> [a] -> [a]",
+      "keep acc [] = acc",
+      "keep acc (x:xs) = skip (x : acc) xs",
+      "skip :: [b] -> [b] -> [b]",
+      "skip acc [] = acc",
+      "skip acc (_:xs) = keep acc xs",
+      "main = print (keep [] [1])",
+    );
+    expect(c).toMatch(/const keep\$skip\$loop = <a>\(call: /);
+    expect(c).toContain("export const skip = <a>(");
+  });
+
+  test("groups without tail calls between members are left alone", () => {
+    const c = code(
+      "ping 0 = 0",
+      "ping n = 1 + pong (n - 1)",
+      "pong 0 = 0",
+      "pong n = 1 + ping (n - 1)",
+      "main = print (ping 2)",
+    );
+    expect(c).not.toContain("$loop");
+  });
+});
