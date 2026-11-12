@@ -60,7 +60,8 @@ export const main: rt.IO<undefined> = Effect.gen(function* () {
 
 ## Usage
 
-Requires Node.js 22.18 or later (for built-in TypeScript type stripping).
+Requires Node.js 22.18 or later (for built-in TypeScript type stripping), or Nix (see
+[With Nix](#with-nix)).
 
 ```sh
 vp install
@@ -93,6 +94,19 @@ Runtime errors are printed as GHC prints them, with exit code 1:
 ```
 Main: Main.hs:(4,1)-(5,20): Non-exhaustive patterns in function name
 ```
+
+### With Nix
+
+Instead of installing Node.js and pnpm yourself, you can use the Nix flake:
+
+```sh
+nix run . -- run Main.hs     # build the CLI and run a program
+nix build                    # builds result/bin/hs2effect
+```
+
+The packaged `hs2effect run` writes generated programs under
+`$XDG_CACHE_HOME/haskell-to-effect/` (default `~/.cache`), because the Nix store is
+read-only.
 
 ## The supported subset
 
@@ -212,6 +226,9 @@ source → lexer → layout → parser → lowering → type inference → code 
 
 ## Development
 
+With Nix, `nix develop` opens a shell with Node.js 24 and pnpm, and puts
+`node_modules/.bin` (`vp`, `tsc`) on `PATH`. Run `vp install` in it first.
+
 ```sh
 vp check   # format, lint and type-check
 vp test    # unit tests and golden tests
@@ -227,3 +244,6 @@ TypeScript is type-checked with `tsc --strict`, and the program is run with Node
 
 The expected outputs are what GHC prints. GHC is not used in the tests, so add new
 programs carefully.
+
+After changing dependencies (`pnpm-lock.yaml`), update `pnpmDeps.hash` in `flake.nix`:
+run `nix build`, and copy the `got:` hash from the error.
