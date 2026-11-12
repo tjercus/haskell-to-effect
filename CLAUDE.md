@@ -35,6 +35,9 @@ release. Add a tool name to select part of the graph. For example, run
 A compiler from a Haskell subset to typed TypeScript on Effect. See `README.md` for the
 language and its differences from Haskell, and `PLAN.md` for design decisions.
 
+Notes for agents, including where to find the Effect source (`./docs/repos/effect`), are in
+@AGENTS.md.
+
 - Pipeline: `src/syntax` (lexer, layout, parser) → `src/core` (lowering to Core) →
   `src/types` (inference) → `src/codegen` (decision trees, TypeScript) → `src/compile.ts`.
   The CLI is `src/cli.ts`; the runtime copied next to compiled programs is
